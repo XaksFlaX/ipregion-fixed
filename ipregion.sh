@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# print_cell strips color codes with an extended pattern: +([0-9;])
+shopt -s extglob
+
 SCRIPT_VERSION="2026.10.23"
 SCRIPT_URL="https://github.com/XaksFlaX/ipregion-fixed"
 DEPENDENCIES=("jq" "curl" "util-linux")
@@ -1567,24 +1570,36 @@ add_result() {
   esac
 }
 
+# Prints a table cell padded to a visible width; color codes in it take no space on screen
+print_cell() {
+  local text="$1"
+  local width="$2"
+  local plain="${text//$'\e'\[+([0-9;])m/}"
+  local pad=$((width - ${#plain}))
+
+  ((pad < 1)) && pad=1
+  printf "%s%*s" "$text" "$pad" ""
+}
+
 # Prints one group of the table. The first group gets the "Service IPv4 IPv6" header,
-# the next ones are separated from it by an empty line
+# the next ones are separated from it by an empty line. Fixed-width columns instead of
+# tabs: values such as "Originals only" are longer than one tab stop
 print_table_group() {
     local group="$1"
     local show_header="${2:-true}"
     local na="N/A"
     local show_ipv4=0
     local show_ipv6=0
-    local separator=$'\t'
-    local col_width=32
+    local name_width=24
+    local value_width=16
 
     [[ "$IPV6_ONLY" != true && -n "$EXTERNAL_IPV4" ]] && show_ipv4=1
     [[ "$IPV4_ONLY" != true && -n "$EXTERNAL_IPV6" ]] && show_ipv6=1
 
     if [[ "$show_header" == true ]]; then
-        printf "%-${col_width}s" "$(color TABLE_HEADER 'Service')"
-        [[ $show_ipv4 -eq 1 ]] && printf "%s%s" "$separator" "$(color TABLE_HEADER 'IPv4')"
-        [[ $show_ipv6 -eq 1 ]] && printf "%s%s" "$separator" "$(color TABLE_HEADER 'IPv6')"
+        print_cell "$(color TABLE_HEADER 'Service')" "$name_width"
+        [[ $show_ipv4 -eq 1 ]] && print_cell "$(color TABLE_HEADER 'IPv4')" "$value_width"
+        [[ $show_ipv6 -eq 1 ]] && print_cell "$(color TABLE_HEADER 'IPv6')" "$value_width"
     fi
     printf "\n"
 
@@ -1596,16 +1611,16 @@ print_table_group() {
         | @tsv
     ' <<<"$RESULT_JSON" | while IFS=$'\t' read -r s v4 v6; do
 
-        printf "%-${col_width}s" "$(color SERVICE "$s")"
+        print_cell "$(color SERVICE "$s")" "$name_width"
 
         if [[ $show_ipv4 -eq 1 ]]; then
             [[ "$v4" == "null" || -z "$v4" ]] && v4="$na"
-            printf "%s%s" "$separator" "$(format_value "$v4" "$na")"
+            print_cell "$(format_value "$v4" "$na")" "$value_width"
         fi
 
         if [[ $show_ipv6 -eq 1 ]]; then
             [[ "$v6" == "null" || -z "$v6" ]] && v6="$na"
-            printf "%s%s" "$separator" "$(format_value "$v6" "$na")"
+            print_cell "$(format_value "$v6" "$na")" "$value_width"
         fi
 
         printf "\n"
