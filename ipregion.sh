@@ -4,7 +4,7 @@
 shopt -s extglob
 
 # YYYY.MM.DD.N, N = change of the day. Bump on every change of this file (CI checks it)
-SCRIPT_VERSION="2026.10.23.10"
+SCRIPT_VERSION="2026.10.23.11"
 SCRIPT_URL="https://github.com/XaksFlaX/ipregion-fixed"
 DEPENDENCIES=("jq" "curl" "util-linux")
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
@@ -347,6 +347,8 @@ declare -A PRIMARY_SERVICES=(
   [MAXMIND]="maxmind.com|geoip.maxmind.com|/geoip/v2.1/city/me"
   [RIPE]="rdap.db.ripe.net|rdap.db.ripe.net|/ip/{ip}"
   [IPINFO_IO]="ipinfo.io|ipinfo.io|/widget/demo/{ip}"
+  [IP2LOCATION_IO]="ip2location.io|api.ip2location.io|/?ip={ip}"
+  [IFCONFIG_CO]="ifconfig.co|ifconfig.co|/country-iso?ip={ip}|plain"
   [IPREGISTRY]="ipregistry.co|api.ipregistry.co|/{ip}?hostname=true&key=sb69ksjcajfs4c"
   [IPAPI_CO]="ipapi.co|ipapi.co|/{ip}/json"
   [CLOUDFLARE]="cloudflare.com|www.cloudflare.com|/cdn-cgi/trace"
@@ -366,7 +368,9 @@ PRIMARY_SERVICES_ORDER=(
   "MAXMIND"
   "RIPE"
   "IPINFO_IO"
+  "IP2LOCATION_IO"
   "CLOUDFLARE"
+  "IFCONFIG_CO"
   "IPREGISTRY"
   "IPAPI_CO"
   "IPLOCATION_COM"
@@ -422,6 +426,7 @@ declare -A CUSTOM_SERVICES=(
   [OOKLA_SPEEDTEST]="Ookla Speedtest"
   [JETBRAINS]="JetBrains"
   [BING]="Microsoft (Bing)"
+  [MICROSOFT]="Microsoft (account)"
 )
 
 # Popular services in blocks: "Title|SERVICE SERVICE ...". The order of checks and of the table
@@ -432,7 +437,7 @@ CUSTOM_SECTIONS=(
   "Video|NETFLIX NETFLIX_CATALOG DISNEY_PLUS AMAZON_PRIME TWITCH TIKTOK"
   "Music|SPOTIFY SPOTIFY_SIGNUP DEEZER"
   "Social|REDDIT REDDIT_GUEST_ACCESS"
-  "Other|APPLE STEAM PLAYSTATION OOKLA_SPEEDTEST JETBRAINS BING"
+  "Other|APPLE STEAM PLAYSTATION OOKLA_SPEEDTEST JETBRAINS BING MICROSOFT"
 )
 
 CUSTOM_SERVICES_ORDER=()
@@ -476,6 +481,8 @@ declare -A CUSTOM_SERVICES_HANDLERS=(
   [OOKLA_SPEEDTEST]="lookup_ookla_speedtest"
   [JETBRAINS]="lookup_jetbrains"
   [BING]="lookup_bing"
+  [MICROSOFT]="lookup_microsoft"
+  [CLOUDFLARE_CDN]="lookup_cloudflare_cdn"
   [IPINFO_NETWORK]="lookup_ipinfo_network"
   [IPAPI_HOSTING]="lookup_ipapi_hosting"
   [PROXYCHECK]="lookup_proxycheck"
@@ -484,11 +491,13 @@ declare -A CUSTOM_SERVICES_HANDLERS=(
 
 declare -A CDN_SERVICES=(
   [YOUTUBE_CDN]="YouTube CDN"
+  [CLOUDFLARE_CDN]="Cloudflare CDN"
   [NETFLIX_CDN]="Netflix CDN"
 )
 
 CDN_SERVICES_ORDER=(
   "YOUTUBE_CDN"
+  "CLOUDFLARE_CDN"
   "NETFLIX_CDN"
 )
 
@@ -1313,6 +1322,9 @@ process_response() {
       ;;
     RIPE)
       jq_filter='.country'
+      ;;
+    IP2LOCATION_IO)
+      jq_filter='.country_code'
       ;;
     IPINFO_IO)
       jq_filter='.data.country'
@@ -2693,6 +2705,39 @@ lookup_tiktok() {
 
   response=$(make_request GET "https://www.tiktok.com/api/v1/web-cookie-privacy/config?appId=1988" --ip-version "$ip_version")
   process_json "$response" ".body.appProps.region"
+}
+
+# Cloudflare CDN (from vernette/ipregion): the Cloudflare data center that serves this IP.
+# speed.cloudflare.com/meta gives its airport code and country, e.g. "DE (FRA)"
+lookup_cloudflare_cdn() {
+  local ip_version="$1"
+  local response iata country
+
+  response=$(make_request GET "https://speed.cloudflare.com/meta"     --ip-version "$ip_version" --header "Referer: https://speed.cloudflare.com")
+  is_valid_json "$response" || return
+
+  iata=$(process_json "$response" '.colo.iata // empty')
+  country=$(process_json "$response" '.colo.cca2 // empty')
+
+  if [[ -z "$country" && -n "$iata" ]]; then
+    country=$(get_iata_location "$iata")
+  fi
+
+  if [[ -n "$country" && -n "$iata" ]]; then
+    echo "$country ($iata)"
+  else
+    echo "$country"
+  fi
+}
+
+# Microsoft account (from vernette/ipregion): the country login.live.com sees.
+# The Bing row uses it only as a fallback for Bing market codes
+lookup_microsoft() {
+  local ip_version="$1"
+  local response
+
+  response=$(make_request GET "https://login.live.com" --ip-version "$ip_version" --user-agent "$USER_AGENT")
+  grep -oP '"sRequestCountry":"\K[^"]*' <<<"$response" | head -n 1
 }
 
 lookup_youtube_cdn() {

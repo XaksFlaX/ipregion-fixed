@@ -60,7 +60,9 @@ How to read it:
 
 Disney+ and Gemini come from the [original script](https://github.com/vernette/ipregion/) (both were dropped in Davoyan's fork):
 Disney+ uses the same request, Gemini the same idea (Google's region list, names compared word by word) without the extra
-downloads of CLDR names. Perplexity is not checked: its API answers the same from Russia and from the Netherlands,
+downloads of CLDR names. Also from the original: two more GeoIP databases (ip2location.io, ifconfig.co),
+`Cloudflare CDN` (the Cloudflare data center that serves the IP, e.g. `DE (FRA)`) and `Microsoft (account)`
+(the country login.live.com sees; the Bing row uses it only as a fallback). Perplexity is not checked: its API answers the same from Russia and from the Netherlands,
 and its site is behind bot protection, so there is no regional signal.
 
 ### IP reputation and DNS
