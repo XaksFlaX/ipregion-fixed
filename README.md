@@ -22,14 +22,13 @@ bash ipregion.sh
 
 ### Output example
 
-A VPS in Moldova, version 2026.10.23.7 (IP addresses, ASN and host name are hidden). Since 2026.10.23.9 the same rows
-are split into titled blocks: Google and YouTube, AI assistants, Video, Music, Social, Other, GeoIP databases, CDN,
-IP reputation and DNS:
+A VPS in Moldova, version 2026.10.23.9 (IP addresses, ASN and host name are hidden):
 
 ![Example output of ipregion-fixed](docs/example-output.png)
 
 How to read it:
 
+- **Blocks** — Google and YouTube, AI assistants, Video, Music, Social, Other, then GeoIP databases, CDN and IP reputation.
 - **Columns** — the same check over IPv4 and IPv6. `N/A` in the IPv6 column usually means the service has no IPv6.
 - **Country codes** — where the service thinks the IP is. Here services disagree: about half see Moldova (`MD`), half Romania (`RO`).
 - **YouTube Premium / Music `No`** — Google sees Moldova, where they are not offered.

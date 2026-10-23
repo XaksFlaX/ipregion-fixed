@@ -26,14 +26,13 @@ bash ipregion.sh
 
 ### Пример вывода
 
-VPS в Молдове, версия 2026.10.23.7 (IP-адреса, ASN и имя сервера скрыты). С версии 2026.10.23.9 те же строки
-разбиты на блоки с заголовками: Google and YouTube, AI assistants, Video, Music, Social, Other, GeoIP databases, CDN,
-IP reputation and DNS:
+VPS в Молдове, версия 2026.10.23.9 (IP-адреса, ASN и имя сервера скрыты):
 
 ![Пример вывода ipregion-fixed](docs/example-output.png)
 
 Как читать:
 
+- **Блоки** — Google and YouTube, AI assistants, Video, Music, Social, Other, затем GeoIP-базы, CDN и репутация IP.
 - **Колонки** — одна и та же проверка по IPv4 и по IPv6. `N/A` в колонке IPv6 обычно значит, что у сервиса нет IPv6.
 - **Коды стран** — где, по мнению сервиса, находится IP. Здесь мнения разошлись: примерно половина видит Молдову (`MD`), половина — Румынию (`RO`).
 - **YouTube Premium / Music `No`** — Google видит Молдову, а там они не предоставляются.
