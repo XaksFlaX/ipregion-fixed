@@ -22,8 +22,7 @@ bash ipregion.sh
 
 ### Output example
 
-A VPS in Moldova, version 2026.10.23.2 (IP addresses and ASN are hidden). Newer versions also print the Gemini and Copilot rows,
-the [IP reputation and DNS block](#ip-reputation-and-dns) and the [summary](#summary) after the table:
+A VPS in Moldova, version 2026.10.23.7 (IP addresses, ASN and host name are hidden):
 
 ![Example output of ipregion-fixed](docs/example-output.png)
 
@@ -32,12 +31,17 @@ How to read it:
 - **Columns** — the same check over IPv4 and IPv6. `N/A` in the IPv6 column usually means the service has no IPv6.
 - **Country codes** — where the service thinks the IP is. Here services disagree: about half see Moldova (`MD`), half Romania (`RO`).
 - **YouTube Premium / Music `No`** — Google sees Moldova, where they are not offered.
-- **ChatGPT / Claude Access `Yes`** — both work from this IP.
+- **ChatGPT / Claude / Gemini / Copilot Access `Yes`** — all four work from this IP.
 - **Netflix Catalog `Originals only`** — Netflix shows only its own titles here.
 - **Disney+ `No`** — Disney refuses this IP ("Forbidden location").
 - **Reddit `Blocked`** — Reddit blocks this IP (typical for hosting); Guest Access `No`: even the site does not open.
 - **The second block** — GeoIP databases; **YouTube/Netflix CDN** — the country of the node that serves video.
+- **[Network block](#ip-reputation-and-dns)** — all three sources see a hosting address, proxycheck also calls it a VPN;
+  the DNS resolver is Google in Germany (checked once, so the IPv6 column says `same as IPv4`).
 - **Legend** — share of services that see each country, counted over country codes only.
+- **[Summary](#summary)** — what works and what does not, per IP version. Here two kinds of refusals are visible:
+  YouTube Premium and Music because of the country (Google sees Moldova), Netflix, Disney+ and Reddit because of the
+  hosting/VPN address. On IPv6 Reddit and Prime Video are `Not checked`: they have no IPv6.
 
 ## What is new in this fork
 
