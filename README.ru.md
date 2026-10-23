@@ -26,7 +26,9 @@ bash ipregion.sh
 
 ### Пример вывода
 
-VPS в Молдове, версия 2026.10.23.7 (IP-адреса, ASN и имя сервера скрыты):
+VPS в Молдове, версия 2026.10.23.7 (IP-адреса, ASN и имя сервера скрыты). С версии 2026.10.23.9 те же строки
+разбиты на блоки с заголовками: Google and YouTube, AI assistants, Video, Music, Social, Other, GeoIP databases, CDN,
+IP reputation and DNS:
 
 ![Пример вывода ipregion-fixed](docs/example-output.png)
 

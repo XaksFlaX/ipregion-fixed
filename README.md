@@ -22,7 +22,9 @@ bash ipregion.sh
 
 ### Output example
 
-A VPS in Moldova, version 2026.10.23.7 (IP addresses, ASN and host name are hidden):
+A VPS in Moldova, version 2026.10.23.7 (IP addresses, ASN and host name are hidden). Since 2026.10.23.9 the same rows
+are split into titled blocks: Google and YouTube, AI assistants, Video, Music, Social, Other, GeoIP databases, CDN,
+IP reputation and DNS:
 
 ![Example output of ipregion-fixed](docs/example-output.png)
 

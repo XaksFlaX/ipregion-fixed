@@ -4,7 +4,7 @@
 shopt -s extglob
 
 # YYYY.MM.DD.N, N = change of the day. Bump on every change of this file (CI checks it)
-SCRIPT_VERSION="2026.10.23.8"
+SCRIPT_VERSION="2026.10.23.9"
 SCRIPT_URL="https://github.com/XaksFlaX/ipregion-fixed"
 DEPENDENCIES=("jq" "curl" "util-linux")
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
@@ -418,42 +418,32 @@ declare -A CUSTOM_SERVICES=(
   [APPLE]="Apple"
   [STEAM]="Steam"
   [PLAYSTATION]="PlayStation"
-  [TIKTOK]="Tiktok"
+  [TIKTOK]="TikTok"
   [OOKLA_SPEEDTEST]="Ookla Speedtest"
   [JETBRAINS]="JetBrains"
   [BING]="Microsoft (Bing)"
 )
 
-CUSTOM_SERVICES_ORDER=(
-  "GOOGLE"
-  "GOOGLE_SEARCH_CAPTCHA"
-  "YOUTUBE"
-  "YOUTUBE_PREMIUM"
-  "YOUTUBE_MUSIC"
-  "TWITCH"
-  "CHATGPT"
-  "CHATGPT_ACCESS"
-  "CLAUDE_ACCESS"
-  "GEMINI_ACCESS"
-  "COPILOT_ACCESS"
-  "GROK_ACCESS"
-  "NETFLIX"
-  "NETFLIX_CATALOG"
-  "DISNEY_PLUS"
-  "SPOTIFY"
-  "SPOTIFY_SIGNUP"
-  "DEEZER"
-  "REDDIT"
-  "REDDIT_GUEST_ACCESS"
-  "AMAZON_PRIME"
-  "APPLE"
-  "STEAM"
-  "PLAYSTATION"
-  "TIKTOK"
-  "OOKLA_SPEEDTEST"
-  "JETBRAINS"
-  "BING"
+# Popular services in blocks: "Title|SERVICE SERVICE ...". The order of checks and of the table
+# comes from here, the titles are printed above each block
+CUSTOM_SECTIONS=(
+  "Google and YouTube|GOOGLE GOOGLE_SEARCH_CAPTCHA YOUTUBE YOUTUBE_PREMIUM YOUTUBE_MUSIC"
+  "AI assistants|CHATGPT CHATGPT_ACCESS CLAUDE_ACCESS GEMINI_ACCESS COPILOT_ACCESS GROK_ACCESS"
+  "Video|NETFLIX NETFLIX_CATALOG DISNEY_PLUS AMAZON_PRIME TWITCH TIKTOK"
+  "Music|SPOTIFY SPOTIFY_SIGNUP DEEZER"
+  "Social|REDDIT REDDIT_GUEST_ACCESS"
+  "Other|APPLE STEAM PLAYSTATION OOKLA_SPEEDTEST JETBRAINS BING"
 )
+
+CUSTOM_SERVICES_ORDER=()
+declare -A CUSTOM_SECTION_OF=() # display name -> block title
+for _section in "${CUSTOM_SECTIONS[@]}"; do
+  for _service in ${_section#*|}; do
+    CUSTOM_SERVICES_ORDER+=("$_service")
+    CUSTOM_SECTION_OF["${CUSTOM_SERVICES[$_service]}"]="${_section%%|*}"
+  done
+done
+unset _section _service
 
 declare -A CUSTOM_SERVICES_HANDLERS=(
   [GOOGLE]="lookup_google"
@@ -1669,17 +1659,26 @@ print_cell() {
   printf "%s%*s" "$text" "$pad" ""
 }
 
+declare -A GROUP_TITLES=(
+  [primary]="GeoIP databases"
+  [cdn]="CDN"
+  [network]="IP reputation and DNS"
+)
+
 # Prints one group of the table. The first group gets the "Service IPv4 IPv6" header,
-# the next ones are separated from it by an empty line. Fixed-width columns instead of
-# tabs: values such as "Originals only" are longer than one tab stop
+# the next ones start after an empty line. Each block has a title (popular services:
+# one per CUSTOM_SECTIONS block) and its rows are indented. Fixed-width columns instead
+# of tabs: values such as "Originals only" are longer than one tab stop
 print_table_group() {
     local group="$1"
     local show_header="${2:-true}"
     local na="N/A"
     local show_ipv4=0
     local show_ipv6=0
-    local name_width=24
+    local name_width=26
     local value_width=16
+    local section=""
+    local row_section
 
     [[ "$IPV6_ONLY" != true && -n "$EXTERNAL_IPV4" ]] && show_ipv4=1
     [[ "$IPV4_ONLY" != true && -n "$EXTERNAL_IPV6" ]] && show_ipv6=1
@@ -1699,7 +1698,20 @@ print_table_group() {
         | @tsv
     ' <<<"$RESULT_JSON" | while IFS=$'\t' read -r s v4 v6; do
 
-        print_cell "$(color SERVICE "$s")" "$name_width"
+        if [[ "$group" == "custom" ]]; then
+            row_section="${CUSTOM_SECTION_OF[$s]:-Other}"
+        else
+            row_section="${GROUP_TITLES[$group]:-}"
+        fi
+
+        if [[ "$row_section" != "$section" ]]; then
+            # An empty line between the blocks of the popular services
+            [[ -n "$section" ]] && printf "\n"
+            printf "%s\n" "$(color HEADER "$row_section")"
+            section="$row_section"
+        fi
+
+        print_cell "  $(color SERVICE "$s")" "$name_width"
 
         if [[ $show_ipv4 -eq 1 ]]; then
             [[ "$v4" == "null" || -z "$v4" ]] && v4="$na"
