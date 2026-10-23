@@ -196,6 +196,14 @@ Examples:
   ipregion.sh -P 1                  # Check services one by one
 ```
 
+## Versions and caching
+
+The first line of the output shows the version, e.g. `ipregion-fixed 2026.10.23.1`. Every change of `ipregion.sh` bumps
+`SCRIPT_VERSION` (`YYYY.MM.DD.N`), and GitHub Actions fails the build if it was not bumped.
+
+GitHub caches files under `raw.githubusercontent.com/.../main/...` for up to 5 minutes, so right after an update
+the `main` link may still serve the previous version. A link to a specific commit is never stale.
+
 ## License
 
 MIT, see [LICENSE](LICENSE). Copyright of the original script: Nikita Skryabin (vernette).

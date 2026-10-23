@@ -5,10 +5,12 @@ on:
     paths:
       - "ipregion.sh"
       - ".github/workflows/shellcheck.yml"
+      - ".github/check_version_bump.sh"
   pull_request:
     paths:
       - "ipregion.sh"
       - ".github/workflows/shellcheck.yml"
+      - ".github/check_version_bump.sh"
 
 permissions:
   contents: read
@@ -18,6 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Bash syntax
         run: bash -n ipregion.sh
@@ -27,3 +31,10 @@ jobs:
         run: |
           shellcheck --version
           shellcheck --severity=warning ipregion.sh
+
+      # The header shows SCRIPT_VERSION, so every change of the script must bump it:
+      # otherwise a run cannot tell an old cached copy from the new one
+      - name: SCRIPT_VERSION bumped
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: bash .github/check_version_bump.sh "$BASE"

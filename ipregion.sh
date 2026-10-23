@@ -3,7 +3,8 @@
 # print_cell strips color codes with an extended pattern: +([0-9;])
 shopt -s extglob
 
-SCRIPT_VERSION="2026.10.23"
+# YYYY.MM.DD.N, N = change of the day. Bump on every change of this file (CI checks it)
+SCRIPT_VERSION="2026.10.23.1"
 SCRIPT_URL="https://github.com/XaksFlaX/ipregion-fixed"
 DEPENDENCIES=("jq" "curl" "util-linux")
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
