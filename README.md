@@ -64,8 +64,7 @@ a hosting or VPN address. A block after the CDN rows shows how the IP is seen:
 
 | Row | Values | Source |
 |---|---|---|
-| Network type (ipinfo) | `Hosting` / `ISP` / `Business` / `Education` | ipinfo.io (the same free widget as the ipinfo.io row) |
-| VPN/Proxy (ipinfo) | `No` / `VPN`, `Proxy`, `Tor`, `Relay` | ipinfo.io |
+| Network (ipinfo) | `Hosting` / `ISP` / `Business` / `Education`, then `VPN`, `Proxy`, `Tor`, `Relay` if flagged, e.g. `Hosting, VPN` | ipinfo.io: the same free widget answer as the ipinfo.io row, requested once (ipinfo rate-limits repeated requests) |
 | Hosting (ip-api) | `Yes` / `No` | ip-api.com |
 | VPN/Proxy (proxycheck) | `No` / `VPN` / `Proxy` / … | proxycheck.io (free: 100 queries a day per IP) |
 | DNS resolver | country and provider, e.g. `DE Google` | edns.ip-api.com: which resolver looked up a random name. The script's own DoH is bypassed here, so this is the system resolver (or the proxy's one with `-p`). Checked once: the IPv6 column says `same as IPv4` (edns.ip-api.com has no IPv6, so with `-6` it is `N/A`) |

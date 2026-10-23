@@ -4,7 +4,7 @@
 shopt -s extglob
 
 # YYYY.MM.DD.N, N = change of the day. Bump on every change of this file (CI checks it)
-SCRIPT_VERSION="2026.10.23.5"
+SCRIPT_VERSION="2026.10.23.6"
 SCRIPT_URL="https://github.com/XaksFlaX/ipregion-fixed"
 DEPENDENCIES=("jq" "curl" "util-linux")
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
@@ -483,8 +483,7 @@ declare -A CUSTOM_SERVICES_HANDLERS=(
   [OOKLA_SPEEDTEST]="lookup_ookla_speedtest"
   [JETBRAINS]="lookup_jetbrains"
   [BING]="lookup_bing"
-  [IPINFO_TYPE]="lookup_ipinfo_type"
-  [IPINFO_PRIVACY]="lookup_ipinfo_privacy"
+  [IPINFO_NETWORK]="lookup_ipinfo_network"
   [IPAPI_HOSTING]="lookup_ipapi_hosting"
   [PROXYCHECK]="lookup_proxycheck"
   [DNS_RESOLVER]="lookup_dns_resolver"
@@ -502,16 +501,14 @@ CDN_SERVICES_ORDER=(
 
 # How the IP itself is seen: hosting, VPN or proxy flags and the DNS resolver in use
 declare -A NETWORK_SERVICES=(
-  [IPINFO_TYPE]="Network type (ipinfo)"
-  [IPINFO_PRIVACY]="VPN/Proxy (ipinfo)"
+  [IPINFO_NETWORK]="Network (ipinfo)"
   [IPAPI_HOSTING]="Hosting (ip-api)"
   [PROXYCHECK]="VPN/Proxy (proxycheck)"
   [DNS_RESOLVER]="DNS resolver"
 )
 
 NETWORK_SERVICES_ORDER=(
-  "IPINFO_TYPE"
-  "IPINFO_PRIVACY"
+  "IPINFO_NETWORK"
   "IPAPI_HOSTING"
   "PROXYCHECK"
   "DNS_RESOLVER"
@@ -1281,11 +1278,16 @@ probe_service() {
     done
   fi
 
-  if [[ "$ip_version" == "6" ]] && is_ipv6_over_ipv4_service "$service"; then
-    ip_version="4"
-  fi
+  if [[ "$service" == "IPINFO_IO" ]]; then
+    # One answer shared with the "Network (ipinfo)" row: ipinfo.io rate-limits repeated requests
+    response=$(ipinfo_widget "$ip_version")
+  else
+    if [[ "$ip_version" == "6" ]] && is_ipv6_over_ipv4_service "$service"; then
+      ip_version="4"
+    fi
 
-  response=$(make_request GET "$url" "${request_params[@]}" --ip-version "$ip_version")
+    response=$(make_request GET "$url" "${request_params[@]}" --ip-version "$ip_version")
+  fi
 
   process_response "$service" "$response" "$display_name" "$response_format"
 }
@@ -1947,10 +1949,12 @@ SUMMARY_FILTER='
     | map({kind: kind, label: row_label})) as $rows
   | ([ (.results.network // [])[] | select(.service != "DNS resolver")
        | {service, value: ((.[$v] // "") | plain)}
-       | select(.value != "" and .value != "No" and .value != "ISP" and .value != "N/A"
-                and .value != "null" and .value != "Timeout" and .value != "RateLimited")
-       | (if .value == "Yes" then (.service | sub(" \\(.*"; "")) else .value end)
-         + " (" + (.service | capture("\\((?<s>[^)]*)\\)").s // "") + ")" ]) as $flags
+       | select(.value | IN("", "N/A", "null", "Timeout", "RateLimited") | not)
+       | (.service | capture("\\((?<s>[^)]*)\\)").s // "") as $source
+       | (if .value == "Yes" then [.service | sub(" \\(.*"; "")] else (.value | split(", ")) end)
+       | map(select(IN("No", "ISP", "Business", "Education") | not))
+       | select(length > 0)
+       | join(", ") + " (" + $source + ")" ]) as $flags
   | ($rows | map(select(.kind == "works") | .label) | "works\t" + join(", ")),
     ($rows | map(select(.kind == "blocked") | .label) | "blocked\t" + join(", ")),
     ($rows | map(select(.kind == "unknown") | .label) | "unknown\t" + join(", ")),
@@ -2519,41 +2523,50 @@ network_transport() {
   fi
 }
 
+# The ipinfo.io widget answer for the IPv4 ($1 = 4) or IPv6 address, fetched once per run: the
+# ipinfo.io row and the "Network (ipinfo)" row run in parallel, the first one takes a lock and
+# fetches, the other waits for the file. Its HTTP statuses are replayed into the caller's
+# STATUS_LOG, so a 429 still shows as RateLimited in both rows
 ipinfo_widget() {
-  make_request GET "https://ipinfo.io/widget/demo/$(external_ip_for "$1")" --ip-version "$(network_transport)"
+  local cache="$WORK_DIR/ipinfo_$1"
+  local i
+
+  if mkdir "$cache.lock" 2>/dev/null; then
+    STATUS_LOG="$cache.status" make_request GET "https://ipinfo.io/widget/demo/$(external_ip_for "$1")" \
+      --ip-version "$(network_transport)" >"$cache.tmp"
+    mv "$cache.tmp" "$cache"
+  else
+    for ((i = 0; i < (CURL_TIMEOUT + 2) * 10; i++)); do
+      [[ -f "$cache" ]] && break
+      sleep 0.1
+    done
+  fi
+
+  if [[ -n "${STATUS_LOG:-}" && -f "$cache.status" ]]; then
+    cat "$cache.status" >>"$STATUS_LOG"
+  fi
+
+  cat "$cache" 2>/dev/null
 }
 
-# Network type by ipinfo.io: hosting, isp, business, education
-lookup_ipinfo_type() {
-  local response type
+# ipinfo.io in one request (it rate-limits repeated ones): the network type (Hosting, ISP,
+# Business, Education) followed by the VPN, Proxy, Tor and Relay flags, e.g. "Hosting, VPN"
+lookup_ipinfo_network() {
+  local response network
 
   response=$(ipinfo_widget "$1")
   is_valid_json "$response" || return
-  type=$(process_json "$response" '.data.asn.type // .data.company.type // empty')
+  network=$(process_json "$response" '
+    .data as $d
+    | ($d.asn.type // $d.company.type // "") as $type
+    | [ (if $type == "isp" then "ISP" elif $type != "" then ($type[:1] | ascii_upcase) + $type[1:] else empty end),
+        ($d.privacy // {} | (select(.vpn) | "VPN"), (select(.proxy) | "Proxy"), (select(.tor) | "Tor"), (select(.relay) | "Relay")) ]
+    | join(", ")')
 
-  case "$type" in
-    hosting) print_value_or_colored "Hosting" "HEART" ;;
-    isp) print_value_or_colored "ISP" "SERVICE" ;;
+  case "$network" in
     "") ;;
-    *) echo "${type^}" ;;
-  esac
-}
-
-# VPN, proxy, Tor and relay flags by ipinfo.io
-lookup_ipinfo_privacy() {
-  local response flags
-
-  response=$(ipinfo_widget "$1")
-  is_valid_json "$response" || return
-  flags=$(process_json "$response" '
-    .data.privacy // empty
-    | [ (select(.vpn) | "VPN"), (select(.proxy) | "Proxy"), (select(.tor) | "Tor"), (select(.relay) | "Relay") ]
-    | if length == 0 then "No" else join(", ") end')
-
-  case "$flags" in
-    No) print_value_or_colored "No" "SERVICE" ;;
-    "") ;;
-    *) print_value_or_colored "$flags" "HEART" ;;
+    ISP | Business | Education) print_value_or_colored "$network" "SERVICE" ;;
+    *) print_value_or_colored "$network" "HEART" ;;
   esac
 }
 

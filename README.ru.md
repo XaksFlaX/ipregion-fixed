@@ -69,8 +69,7 @@ Disney+ — с тем же запросом, Gemini — с той же идее�
 
 | Строка | Значения | Источник |
 |---|---|---|
-| Network type (ipinfo) | `Hosting` / `ISP` / `Business` / `Education` | ipinfo.io (тот же бесплатный виджет, что и в строке ipinfo.io) |
-| VPN/Proxy (ipinfo) | `No` / `VPN`, `Proxy`, `Tor`, `Relay` | ipinfo.io |
+| Network (ipinfo) | `Hosting` / `ISP` / `Business` / `Education`, а при пометке ещё `VPN`, `Proxy`, `Tor`, `Relay`, например `Hosting, VPN` | ipinfo.io: тот же ответ бесплатного виджета, что и для строки ipinfo.io, запрашивается один раз (ipinfo ограничивает повторные запросы) |
 | Hosting (ip-api) | `Yes` / `No` | ip-api.com |
 | VPN/Proxy (proxycheck) | `No` / `VPN` / `Proxy` / … | proxycheck.io (бесплатно: 100 запросов в сутки с одного IP) |
 | DNS resolver | страна и провайдер, например `DE Google` | edns.ip-api.com: какой резолвер запросил случайное имя. Собственный DoH скрипта здесь не используется, поэтому это системный резолвер (или резолвер прокси при `-p`). Проверяется один раз: в колонке IPv6 — `same as IPv4` (у edns.ip-api.com нет IPv6, поэтому с `-6` будет `N/A`) |
