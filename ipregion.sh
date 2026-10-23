@@ -2327,7 +2327,7 @@ lookup_playstation() {
 }
 
 check_doh() {
-    local test_domain="${1:-www.google.com}"
+    local test_domain="www.google.com"
 
     local resolvers=(
         "Cloudflare|https://1.1.1.1/dns-query|https://1.1.1.1/dns-query"
