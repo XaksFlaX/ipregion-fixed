@@ -99,8 +99,8 @@ When a check gets no answer, the row shows why:
 
 ### Faster
 
-Checks run 6 at a time (`-P N` to change, `-P 1` for one by one). On our servers a full run went from 20–46 s down to 10–17 s
-with exactly the same results.
+Checks run 6 at a time (`-P N` to change, `-P 1` for one by one). On our servers a full run takes 12–19 s instead of
+22–47 s one by one, with the same results.
 
 The version is printed in the header and in JSON (`script_version`).
 

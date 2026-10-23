@@ -4,7 +4,7 @@
 shopt -s extglob
 
 # YYYY.MM.DD.N, N = change of the day. Bump on every change of this file (CI checks it)
-SCRIPT_VERSION="2026.10.23.9"
+SCRIPT_VERSION="2026.10.23.10"
 SCRIPT_URL="https://github.com/XaksFlaX/ipregion-fixed"
 DEPENDENCIES=("jq" "curl" "util-linux")
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
@@ -1405,6 +1405,9 @@ run_lookup() {
 
     if [[ -n "$reason" ]]; then
       result=$(print_value_or_colored "$reason" "$color_name")
+    else
+      # "null" and "N/A" become an empty cell: N/A in the table, null in JSON
+      result=""
     fi
   fi
 
@@ -2812,7 +2815,11 @@ main() {
   get_asn
   start_update_check
 
-  if [[ "$JSON_OUTPUT" != true && "$VERBOSE" != true ]]; then
+  # The spinner only makes sense in a terminal: redirected to a file or a pipe it leaves
+  # "\r Checking: ..." garbage in the output
+  local show_spinner=false
+  if [[ "$JSON_OUTPUT" != true && "$VERBOSE" != true && -t 1 ]]; then
+    show_spinner=true
     trap 'spinner_stop; exit' INT TERM
     spinner_start
   fi
@@ -2826,7 +2833,7 @@ main() {
       ;;
   esac
 
-  if [[ "$JSON_OUTPUT" != true && "$VERBOSE" != true ]]; then
+  if [[ "$show_spinner" == true ]]; then
     spinner_stop
     trap - INT TERM
   fi
