@@ -4,7 +4,7 @@
 shopt -s extglob
 
 # YYYY.MM.DD.N, N = change of the day. Bump on every change of this file (CI checks it)
-SCRIPT_VERSION="2026.10.23.6"
+SCRIPT_VERSION="2026.10.23.7"
 SCRIPT_URL="https://github.com/XaksFlaX/ipregion-fixed"
 DEPENDENCIES=("jq" "curl" "util-linux")
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
@@ -534,9 +534,9 @@ IDENTITY_SERVICES=(
   "icanhazip.com"
 )
 
-IPV6_OVER_IPV4_SERVICES=(
-  "IPINFO_IO"
-)
+# Services asked about the IPv6 address over IPv4. Empty since ipinfo.io moved to ipinfo_widget,
+# which asks v6.ipinfo.io over IPv6 instead
+IPV6_OVER_IPV4_SERVICES=()
 
 color() {
   local color_name="$1"
@@ -2526,14 +2526,22 @@ network_transport() {
 # The ipinfo.io widget answer for the IPv4 ($1 = 4) or IPv6 address, fetched once per run: the
 # ipinfo.io row and the "Network (ipinfo)" row run in parallel, the first one takes a lock and
 # fetches, the other waits for the file. Its HTTP statuses are replayed into the caller's
-# STATUS_LOG, so a 429 still shows as RateLimited in both rows
+# STATUS_LOG, so a 429 still shows as RateLimited in both rows.
+# ipinfo answers freely only about the address the request comes from; lookups of other addresses
+# have a small daily quota. So each address is asked over its own IP version: ipinfo.io has no
+# IPv6, its IPv6 host is v6.ipinfo.io
 ipinfo_widget() {
   local cache="$WORK_DIR/ipinfo_$1"
+  local host="ipinfo.io"
   local i
 
+  if [[ "$1" == "6" ]]; then
+    host="v6.ipinfo.io"
+  fi
+
   if mkdir "$cache.lock" 2>/dev/null; then
-    STATUS_LOG="$cache.status" make_request GET "https://ipinfo.io/widget/demo/$(external_ip_for "$1")" \
-      --ip-version "$(network_transport)" >"$cache.tmp"
+    STATUS_LOG="$cache.status" make_request GET "https://$host/widget/demo/$(external_ip_for "$1")" \
+      --ip-version "$1" >"$cache.tmp"
     mv "$cache.tmp" "$cache"
   else
     for ((i = 0; i < (CURL_TIMEOUT + 2) * 10; i++)); do
