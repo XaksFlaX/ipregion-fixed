@@ -1,20 +1,27 @@
 #!/usr/bin/env bash
 
+SCRIPT_VERSION="2026.10.23"
 SCRIPT_URL="https://github.com/XaksFlaX/ipregion-fixed"
 DEPENDENCIES=("jq" "curl" "util-linux")
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
-SPINNER_SERVICE_FILE=$(mktemp "${TMPDIR:-/tmp}/ipregion_spinner_XXXXXX")
-# spinner_stop only runs in the interactive mode, so -j/-v runs clean up here
-trap 'rm -f "$SPINNER_SERVICE_FILE"' EXIT
+# One temporary directory for the spinner, per-request statuses and parallel results
+WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/ipregion_XXXXXX")
+SPINNER_SERVICE_FILE="$WORK_DIR/spinner"
+trap 'rm -rf "$WORK_DIR"' EXIT
 
 SPOTIFY_API_KEY="142b583129b2df829de3656f9eb484e6"
 SPOTIFY_CLIENT_ID="9a8d2f0ce77a4e248bb71fefcb557637"
+
+# Public key of the Disney+ Android app, as used by vernette/ipregion
+DISNEY_PLUS_API_KEY="ZGlzbmV5JmFuZHJvaWQmMS4wLjA.bkeb0m230uUhv8qrAXuNu39tbE_mD5EEhM_NAcohjyA"
+DISNEY_PLUS_JSON_BODY='{"query":"\n     mutation registerDevice($registerDevice: RegisterDeviceInput!) {\n       registerDevice(registerDevice: $registerDevice) {\n         __typename\n       }\n     }\n     ","variables":{"registerDevice":{"applicationRuntime":"android","attributes":{"operatingSystem":"Android","operatingSystemVersion":"13"},"deviceFamily":"android","deviceLanguage":"en","deviceProfile":"phone","devicePlatformId":"android"}},"operationName":"registerDevice"}'
 
 VERBOSE=false
 JSON_OUTPUT=false
 GROUPS_TO_SHOW="all"
 CURL_TIMEOUT=6
 CURL_RETRIES=1
+PARALLEL_JOBS=6
 IPV4_ONLY=false
 IPV6_ONLY=false
 PROXY_ADDR=""
@@ -42,7 +49,7 @@ LOG_INFO="INFO"
 LOG_WARN="WARNING"
 LOG_ERROR="ERROR"
 
-SELECTED_DOH_URL=""
+SELECTED_DOH_ARGS=()
 
 declare -A DEPENDENCY_COMMANDS=(
   [jq]="jq"
@@ -363,7 +370,11 @@ declare -A CUSTOM_SERVICES=(
   [YOUTUBE_MUSIC]="YouTube Music"
   [TWITCH]="Twitch"
   [CHATGPT]="ChatGPT"
+  [CHATGPT_ACCESS]="ChatGPT Access"
+  [CLAUDE_ACCESS]="Claude Access"
   [NETFLIX]="Netflix"
+  [NETFLIX_CATALOG]="Netflix Catalog"
+  [DISNEY_PLUS]="Disney+"
   [SPOTIFY]="Spotify"
   [SPOTIFY_SIGNUP]="Spotify Signup"
   [DEEZER]="Deezer"
@@ -374,7 +385,6 @@ declare -A CUSTOM_SERVICES=(
   [STEAM]="Steam"
   [PLAYSTATION]="PlayStation"
   [TIKTOK]="Tiktok"
-  [YOUTUBE_CDN]="YouTube CDN"
   [OOKLA_SPEEDTEST]="Ookla Speedtest"
   [JETBRAINS]="JetBrains"
   [BING]="Microsoft (Bing)"
@@ -388,7 +398,11 @@ CUSTOM_SERVICES_ORDER=(
   "YOUTUBE_MUSIC"
   "TWITCH"
   "CHATGPT"
+  "CHATGPT_ACCESS"
+  "CLAUDE_ACCESS"
   "NETFLIX"
+  "NETFLIX_CATALOG"
+  "DISNEY_PLUS"
   "SPOTIFY"
   "SPOTIFY_SIGNUP"
   "DEEZER"
@@ -405,14 +419,18 @@ CUSTOM_SERVICES_ORDER=(
 )
 
 declare -A CUSTOM_SERVICES_HANDLERS=(
-  [GOOGLE]="lookup_google"  
+  [GOOGLE]="lookup_google"
   [GOOGLE_SEARCH_CAPTCHA]="lookup_google_search_captcha"
   [YOUTUBE]="lookup_youtube"
   [YOUTUBE_PREMIUM]="lookup_youtube_premium"
   [YOUTUBE_MUSIC]="lookup_youtube_music"
   [TWITCH]="lookup_twitch"
   [CHATGPT]="lookup_chatgpt"
+  [CHATGPT_ACCESS]="lookup_chatgpt_access"
+  [CLAUDE_ACCESS]="lookup_claude_access"
   [NETFLIX]="lookup_netflix"
+  [NETFLIX_CATALOG]="lookup_netflix_catalog"
+  [DISNEY_PLUS]="lookup_disney_plus"
   [SPOTIFY]="lookup_spotify"
   [SPOTIFY_SIGNUP]="lookup_spotify_signup"
   [DEEZER]="lookup_deezer"
@@ -423,7 +441,6 @@ declare -A CUSTOM_SERVICES_HANDLERS=(
   [STEAM]="lookup_steam"
   [PLAYSTATION]="lookup_playstation"
   [TIKTOK]="lookup_tiktok"
-  [CLOUDFLARE_CDN]="lookup_cloudflare_cdn"
   [YOUTUBE_CDN]="lookup_youtube_cdn"
   [NETFLIX_CDN]="lookup_netflix_cdn"
   [OOKLA_SPEEDTEST]="lookup_ookla_speedtest"
@@ -463,16 +480,6 @@ IDENTITY_SERVICES=(
 IPV6_OVER_IPV4_SERVICES=(
   "IPINFO_IO"
 )
-
-get_tmpdir() {
-  if [[ -n "$TMPDIR" ]]; then
-    echo "$TMPDIR"
-  elif [[ -d /data/data/com.termux/files/usr/tmp ]]; then
-    echo "/data/data/com.termux/files/usr/tmp"
-  else
-    echo "/tmp"
-  fi
-}
 
 color() {
   local color_name="$1"
@@ -554,6 +561,7 @@ Options:
   -6, --ipv6           Test only IPv6
   -p, --proxy ADDR     Use SOCKS5 proxy (format: host:port)
   -i, --interface IF   Use specified network interface (e.g. eth1)
+  -P, --parallel N     Check N services at a time (default: $PARALLEL_JOBS, 1 = one by one)
 
 Examples:
   $0                       # Check all services with default settings
@@ -566,6 +574,7 @@ Examples:
   $0 -i eth1               # Use network interface eth1
   $0 -j                    # Output result as JSON
   $0 -v                    # Enable verbose logging
+  $0 -P 1                  # Check services one by one
 
 EOF
 }
@@ -836,6 +845,14 @@ parse_arguments() {
         log "$LOG_INFO" "Using interface: $INTERFACE_NAME"
         shift 2
         ;;
+      -P | --parallel)
+        if [[ "$2" =~ ^[1-9][0-9]*$ ]]; then
+          PARALLEL_JOBS="$2"
+        else
+          error_exit "Invalid parallel value: $2. It must be a positive integer"
+        fi
+        shift 2
+        ;;
       *)
         error_exit "Unknown option: $1"
         ;;
@@ -847,7 +864,7 @@ check_ip_support() {
   local version="$1"
   log "$LOG_INFO" "Checking for IPv${version} support"
 
-  if ip -${version} addr show scope global 2>/dev/null | grep -q "inet${version//4/ }"; then
+  if ip "-${version}" addr show scope global 2>/dev/null | grep -q "inet${version//4/ }"; then
     log "$LOG_INFO" "IPv${version} is supported"
     return 0
   fi
@@ -857,7 +874,6 @@ check_ip_support() {
 }
 
 get_external_ip() {
-  local results=()
   local ip
   local counts
   declare -A counts
@@ -1113,8 +1129,19 @@ make_request() {
 
   curl_args+=("$url")
 
-  response_with_code=$(timeout "$CURL_TIMEOUT"s curl "${curl_args[@]}" $SELECTED_DOH_URL)
+  response_with_code=$(timeout "$CURL_TIMEOUT"s curl "${curl_args[@]}" "${SELECTED_DOH_ARGS[@]}")
   local exit_status=$?
+
+  http_code=$(tail -n1 <<<"$response_with_code")
+
+  # run_lookup reads this log to explain an empty result (Blocked, RateLimited, Timeout)
+  if [[ -n "${STATUS_LOG:-}" ]]; then
+    if [[ $exit_status -eq 124 || $exit_status -eq 28 ]]; then
+      echo "timeout" >>"$STATUS_LOG"
+    else
+      echo "$http_code" >>"$STATUS_LOG"
+    fi
+  fi
 
   if [[ $exit_status -eq 124 ]]; then
     echo ""
@@ -1126,7 +1153,6 @@ make_request() {
     return 0
   fi
 
-  http_code=$(tail -n1 <<<"$response_with_code")
   response=$(sed '$d' <<<"$response_with_code")
 
   if [[ "$http_code" == "403" || "$http_code" == "429" ]]; then
@@ -1279,9 +1305,48 @@ country_code_by_name() {
   done
 }
 
+set_spinner_text() {
+  if [[ -n "${SPINNER_SERVICE_FILE:-}" ]]; then
+    echo "$1" >"$SPINNER_SERVICE_FILE"
+  fi
+}
+
+# Runs one lookup with its own status log. An empty result is replaced by the reason
+# taken from the HTTP statuses of its requests: Blocked (403), RateLimited (429), Timeout
+run_lookup() {
+  local log result reason color_name
+
+  log=$(mktemp "$WORK_DIR/status.XXXXXX")
+  result=$(STATUS_LOG="$log" "$@")
+
+  if [[ -z "$result" || "$result" == "null" || "$result" == "N/A" ]]; then
+    if grep -qx "429" "$log"; then
+      reason="RateLimited"
+      color_name="NULL"
+    elif grep -qx "403" "$log"; then
+      reason="Blocked"
+      color_name="HEART"
+    elif grep -qx "timeout" "$log"; then
+      reason="Timeout"
+      color_name="NULL"
+    fi
+
+    if [[ -n "$reason" ]]; then
+      result=$(print_value_or_colored "$reason" "$color_name")
+    fi
+  fi
+
+  rm -f "$log"
+  echo "$result"
+}
+
+# True when this service should also be checked over IPv6
+ipv6_check_enabled() {
+  [[ "$IPV4_ONLY" != true && "$IPV6_SUPPORTED" -eq 0 && -n "$EXTERNAL_IPV6" ]]
+}
+
 process_service() {
   local service="$1"
-  local custom="${2:-false}"
   local service_config="${PRIMARY_SERVICES[$service]}"
   local display_name domain url_template response_format ipv4_result ipv6_result handler_func
 
@@ -1291,169 +1356,136 @@ process_service() {
     display_name="$service"
   fi
 
-  if [[ -n "$SPINNER_SERVICE_FILE" ]]; then
-    echo "$display_name" >"$SPINNER_SERVICE_FILE"
-  fi
-
-  if [[ "$custom" == true ]]; then
-    process_custom_service "$service"
-    return
-  fi
+  set_spinner_text "$display_name"
 
   if [[ -n "${PRIMARY_SERVICES_CUSTOM_HANDLERS[$service]}" ]]; then
     handler_func="${PRIMARY_SERVICES_CUSTOM_HANDLERS[$service]}"
 
-    log "$LOG_INFO" "Checking $display_name via IPv4 (custom handler)"
+    if [[ "$IPV6_ONLY" != true ]]; then
+      log "$LOG_INFO" "Checking $display_name via IPv4 (custom handler)"
+      ipv4_result=$(run_lookup "$handler_func" 4)
+    fi
 
-    ipv4_result=$("$handler_func" 4)
-
-    if [[ "$IPV6_ONLY" == true ]] || { [[ "$IPV6_SUPPORTED" -eq 0 && -n "$EXTERNAL_IPV6" ]] && [[ "$IPV4_ONLY" != true ]]; }; then
+    if ipv6_check_enabled; then
       log "$LOG_INFO" "Checking $display_name via IPv6 (custom handler)"
-      ipv6_result=$("$handler_func" 6)
-    else
-      ipv6_result=""
+      ipv6_result=$(run_lookup "$handler_func" 6)
     fi
-
-    add_result "primary" "$display_name" "$ipv4_result" "$ipv6_result"
-    return
-  fi
-
-  if [[ "$IPV6_ONLY" != true ]]; then
-    if [[ -n "$EXTERNAL_IPV4" ]]; then
+  else
+    if [[ "$IPV6_ONLY" != true && -n "$EXTERNAL_IPV4" ]]; then
       log "$LOG_INFO" "Checking $display_name via IPv4"
-      ipv4_result=$(probe_service "$service" 4 "$EXTERNAL_IPV4")
+      ipv4_result=$(run_lookup probe_service "$service" 4 "$EXTERNAL_IPV4")
     fi
-  fi
 
-  if [[ "$IPV4_ONLY" != true ]]; then
-    if [[ "$IPV6_SUPPORTED" -eq 0 && -n "$EXTERNAL_IPV6" ]]; then
+    if ipv6_check_enabled; then
       if is_ipv6_over_ipv4_service "$service"; then
         log "$LOG_INFO" "Checking $display_name (IPv6 address, IPv4 transport)"
       else
         log "$LOG_INFO" "Checking $display_name via IPv6"
       fi
-      ipv6_result=$(probe_service "$service" 6 "$EXTERNAL_IPV6")
+      ipv6_result=$(run_lookup probe_service "$service" 6 "$EXTERNAL_IPV6")
     fi
   fi
-  
-  ipv4_clean=${ipv4_result#null}
-  ipv6_clean=${ipv6_result#null}
 
-  add_result "primary" "$display_name" "$ipv4_clean" "$ipv6_clean"
-
-  #add_result "primary" "$display_name" "$ipv4_result" "$ipv6_result"
+  add_result "primary" "$display_name" "${ipv4_result#null}" "${ipv6_result#null}"
 }
 
+# Popular services (group "custom") and CDN checks: a handler per service
 process_custom_service() {
-  local service="$1"
-  local ipv4_result ipv6_result
-  local display_name="${CUSTOM_SERVICES[$service]:-$service}"
-  local handler_func="${CUSTOM_SERVICES_HANDLERS[$service]}"
+  local group="$1"
+  local service="$2"
+  local ipv4_result ipv6_result display_name handler_func="${CUSTOM_SERVICES_HANDLERS[$service]}"
 
-  if [[ -z "$display_name" ]]; then
-    display_name="$service"
+  if [[ "$group" == "cdn" ]]; then
+    display_name="${CDN_SERVICES[$service]:-$service}"
+  else
+    display_name="${CUSTOM_SERVICES[$service]:-$service}"
   fi
 
-  echo "$display_name" >"$SPINNER_SERVICE_FILE"
+  set_spinner_text "$display_name"
 
   if [[ -z "$handler_func" ]]; then
-    log "$LOG_WARN" "Unknown custom service: $service"
+    log "$LOG_WARN" "Unknown $group service: $service"
     return
   fi
 
   if [[ "$IPV6_ONLY" != true ]]; then
     log "$LOG_INFO" "Checking $display_name via IPv4"
-    ipv4_result=$("$handler_func" 4)
-  else
-    ipv4_result=""
+    ipv4_result=$(run_lookup "$handler_func" 4)
   fi
 
-  if [[ "$IPV4_ONLY" != true ]] && [[ "$IPV6_SUPPORTED" -eq 0 && -n "$EXTERNAL_IPV6" ]]; then
+  if ipv6_check_enabled; then
     log "$LOG_INFO" "Checking $display_name via IPv6"
-    ipv6_result=$("$handler_func" 6)
-  else
-    ipv6_result=""
+    ipv6_result=$(run_lookup "$handler_func" 6)
   fi
 
-  add_result "custom" "$display_name" "$ipv4_result" "$ipv6_result"
+  add_result "$group" "$display_name" "$ipv4_result" "$ipv6_result"
 }
 
-run_service_group() {
+check_service() {
   local group="$1"
-  local services_string="${SERVICE_GROUPS[$group]}"
-  local is_custom=false
-  local is_cdn=false
-  local services_array service_name handler_func display_name result
+  local service="$2"
 
-  read -ra services_array <<<"$services_string"
+  if [[ "$group" == "primary" ]]; then
+    process_service "$service"
+  else
+    process_custom_service "$group" "$service"
+  fi
+}
 
-  log "$LOG_INFO" "Running $group group services"
+# Checks every service of the given groups, PARALLEL_JOBS at a time. In parallel mode
+# each job writes its add_result line to its own file; the files are read back in the
+# original order, so the table looks the same as with --parallel 1
+run_service_groups() {
+  local results_dir="$WORK_DIR/results"
+  local tasks=() pids=()
+  local group service task index running=0 ipv4 ipv6
 
-  for service_name in "${services_array[@]}"; do
-    if printf "%s\n" "${EXCLUDED_SERVICES[@]}" | grep -Fxq "$service_name"; then
-      log "$LOG_INFO" "Skipping service: $service_name"
-      continue
-    fi
+  for group in "$@"; do
+    for service in ${SERVICE_GROUPS[$group]}; do
+      if printf "%s\n" "${EXCLUDED_SERVICES[@]}" | grep -Fxq "$service"; then
+        log "$LOG_INFO" "Skipping service: $service"
+        continue
+      fi
 
-    if [[ "$group" == "custom" ]]; then
-      is_custom=true
-    else
-      is_custom=false
-    fi
+      tasks+=("$group $service")
+    done
+  done
 
-    if [[ "$group" == "cdn" ]]; then
-      is_cdn=true
-    else
-      is_cdn=false
-    fi
+  log "$LOG_INFO" "Checking ${#tasks[@]} services, $PARALLEL_JOBS at a time"
 
-    if [[ "$is_custom" == true ]]; then
-      process_service "$service_name" true
-    elif [[ "$is_cdn" == true ]]; then
-      handler_func="${CUSTOM_SERVICES_HANDLERS[$service_name]}"
-      display_name="${CDN_SERVICES[$service_name]}"
+  if ((PARALLEL_JOBS <= 1)); then
+    for task in "${tasks[@]}"; do
+      read -r group service <<<"$task"
+      check_service "$group" "$service"
+    done
+    return
+  fi
 
-      if [[ -n "$handler_func" ]]; then
-		  echo "$display_name" >"$SPINNER_SERVICE_FILE"
+  mkdir -p "$results_dir"
 
-		  ipv4_result=""
-		  ipv6_result=""
+  for index in "${!tasks[@]}"; do
+    read -r group service <<<"${tasks[$index]}"
+    (
+      RESULT_OUT="$results_dir/$index"
+      check_service "$group" "$service"
+    ) &
+    pids+=("$!")
+    running=$((running + 1))
 
-		  if [[ "$IPV6_ONLY" != true ]]; then
-			ipv4_result=$("$handler_func" 4)
-		  fi
-
-		  if [[ "$IPV4_ONLY" != true ]] && [[ "$IPV6_SUPPORTED" -eq 0 && -n "$EXTERNAL_IPV6" ]]; then
-			ipv6_result=$("$handler_func" 6)
-		  fi
-
-		  add_result "cdn" "$display_name" "$ipv4_result" "$ipv6_result"
-		fi
-
-    else
-      process_service "$service_name"
+    # Only the check jobs are waited for: the spinner also runs in the background
+    if ((running >= PARALLEL_JOBS)); then
+      wait -n "${pids[@]}" 2>/dev/null
+      running=$((running - 1))
     fi
   done
-}
 
-run_all_services() {
-  local service_name
+  wait "${pids[@]}"
 
-  for func in $(declare -F | awk '{print $3}' | grep '^lookup_'); do
-    service_name=${func#lookup_}
-    service_name_uppercase=${service_name^^}
-
-    if printf "%s\n" "${EXCLUDED_SERVICES[@]}" | grep -Fxq "$service_name_uppercase"; then
-      log "$LOG_INFO" "Skipping service: $service_name_uppercase"
-      continue
+  for index in "${!tasks[@]}"; do
+    if [[ -f "$results_dir/$index" ]]; then
+      IFS=$'\x1f' read -r group service ipv4 ipv6 <"$results_dir/$index"
+      add_result "$group" "$service" "$ipv4" "$ipv6"
     fi
-
-    if [[ -n "${CUSTOM_SERVICES[$service_name_uppercase]}" ]]; then
-      process_service "$service_name_uppercase" true
-      continue
-    fi
-
-    "$func"
   done
 }
 
@@ -1480,7 +1512,8 @@ finalize_json() {
       --rawfile d <(printf "%s" "$t_cdn") \
       --arg ipv4 "$EXTERNAL_IPV4" \
       --arg ipv6 "$EXTERNAL_IPV6" \
-      --arg version "1" '
+      --arg version "1" \
+      --arg script_version "$SCRIPT_VERSION" '
         def lines_to_array($raw):
           if ($raw | length) == 0 then [] else
           ($raw | split("\n"))
@@ -1497,6 +1530,7 @@ finalize_json() {
 
         {
           version: ($version|tonumber),
+          script_version: $script_version,
           ipv4: ($ipv4 | select(length > 0) // null),
           ipv6: ($ipv6 | select(length > 0) // null),
           results: {
@@ -1519,6 +1553,12 @@ add_result() {
   ipv4=${ipv4//$'\t'/ }
   ipv6=${ipv6//$'\n'/}
   ipv6=${ipv6//$'\t'/ }
+
+  # Parallel jobs hand their result to run_service_groups through a file
+  if [[ -n "${RESULT_OUT:-}" ]]; then
+    printf '%s\x1f%s\x1f%s\x1f%s\n' "$group" "$service" "$ipv4" "$ipv6" >"$RESULT_OUT"
+    return
+  fi
 
   case "$group" in
     primary) ARR_PRIMARY+=("$service|||$ipv4|||$ipv6") ;;
@@ -1581,7 +1621,7 @@ print_header() {
   ipv4=$(process_json "$RESULT_JSON" ".ipv4")
   ipv6=$(process_json "$RESULT_JSON" ".ipv6")
 
-  printf "%s\n%s\n\n" "$(color URL "Fork of Davoyan/ipregion")" "$(color URL "$SCRIPT_URL")"
+  printf "%s\n%s\n\n" "$(color URL "ipregion-fixed $SCRIPT_VERSION (fork of Davoyan/ipregion)")" "$(color URL "$SCRIPT_URL")"
 
   if [[ -n "$EXTERNAL_IPV4" ]]; then
     printf "%s: %s\n" "$(color HEADER 'IPv4')" "$(bold "$(mask_ipv4 "$ipv4")")"
@@ -1604,7 +1644,7 @@ print_legend() {
     def clean:
       tostring
       | gsub("\u001b\\[[0-9;]*m"; "")
-      | select(test("^(No|Yes|Blocked|N/A|null)$") | not);
+      | select(test("^[A-Z]{2}$")); # only country codes: not Yes/No/Blocked/Timeout/N/A
 
     def counts(stream):
       [stream | select(. != null) | clean] as $arr
@@ -1728,26 +1768,6 @@ print_results() {
   esac
   
 
-}
-
-lookup_maxmind() {
-  process_service "MAXMIND"
-}
-
-lookup_ripe() {
-  process_service "RIPE"
-}
-
-lookup_ipinfo_io() {
-  process_service "IPINFO_IO"
-}
-
-lookup_ipregistry() {
-  process_service "IPREGISTRY"
-}
-
-lookup_ipapi_co() {
-  process_service "IPAPI_CO"
 }
 
 lookup_cloudflare() {
@@ -1879,6 +1899,106 @@ lookup_netflix() {
   fi
 }
 
+# api.openai.com answers 403 "unsupported_country_region_territory" where ChatGPT is not offered
+lookup_chatgpt_access() {
+  local ip_version="$1"
+  local response http_code
+
+  response=$(make_request GET "https://api.openai.com/compliance/cookie_requirements" \
+    --ip-version "$ip_version" \
+    --header "Authorization: Bearer null" \
+    --with-status)
+  http_code=$(tail -n1 <<<"$response")
+
+  if grep -q "unsupported_country" <<<"$response"; then
+    print_value_or_colored "No" "HEART"
+  elif [[ "$http_code" == "200" ]]; then
+    print_value_or_colored "Yes" "SERVICE"
+  fi
+}
+
+# Without a key the Anthropic API answers 401 in supported regions and 403 "Request not allowed" elsewhere
+lookup_claude_access() {
+  local ip_version="$1"
+  local response http_code
+
+  response=$(make_request POST "https://api.anthropic.com/v1/messages" \
+    --ip-version "$ip_version" \
+    --header "anthropic-version: 2023-06-01" \
+    --json '{}' \
+    --with-status)
+  http_code=$(tail -n1 <<<"$response")
+
+  if [[ "$http_code" == "401" ]]; then
+    print_value_or_colored "Yes" "SERVICE"
+  elif [[ "$http_code" == "403" ]] && grep -q "Request not allowed" <<<"$response"; then
+    print_value_or_colored "No" "HEART"
+  fi
+}
+
+# Netflix shows only its own titles to some regions and to IPs it takes for proxies.
+# 81280792 and 70143836 are licensed titles available in most regions; 80018499 opened
+# everywhere in our tests and is the control that the title pages work at all
+lookup_netflix_catalog() {
+  local ip_version="$1"
+  local title response checked=0 available=0
+
+  for title in 81280792 70143836; do
+    response=$(make_request GET "https://www.netflix.com/title/$title" --follow \
+      --ip-version "$ip_version" --user-agent "$USER_AGENT")
+
+    if [[ -z "$response" ]]; then
+      continue
+    fi
+
+    checked=$((checked + 1))
+    if ! grep -q "Oh no!" <<<"$response"; then
+      available=$((available + 1))
+    fi
+  done
+
+  if ((checked == 0)); then
+    return
+  fi
+
+  if ((available > 0)); then
+    print_value_or_colored "Full" "SERVICE"
+    return
+  fi
+
+  response=$(make_request GET "https://www.netflix.com/title/80018499" --follow \
+    --ip-version "$ip_version" --user-agent "$USER_AGENT")
+
+  if [[ -n "$response" ]] && ! grep -q "Oh no!" <<<"$response"; then
+    print_value_or_colored "Originals only" "HEART"
+  fi
+}
+
+# Disney+ device registration (same request as in vernette/ipregion): the session says
+# whether the service works here and which country it sees
+lookup_disney_plus() {
+  local ip_version="$1"
+  local response
+
+  response=$(make_request POST "https://disney.api.edge.bamgrid.com/graph/v1/device/graphql" \
+    --ip-version "$ip_version" \
+    --header "Authorization: Bearer $DISNEY_PLUS_API_KEY" \
+    --json "$DISNEY_PLUS_JSON_BODY")
+
+  if ! is_valid_json "$response"; then
+    return
+  fi
+
+  case "$(process_json "$response" ".extensions.sdk.session.inSupportedLocation")" in
+    true)
+      process_json "$response" ".extensions.sdk.session.location.countryCode"
+      ;;
+    false)
+      print_value_or_colored "No" "HEART"
+      ;;
+  esac
+}
+
 lookup_spotify() {
   local ip_version="$1"
   local response
@@ -1959,41 +2079,18 @@ lookup_reddit_guest_access() {
 }
 
 lookup_youtube() {
-    local ip_version="$1"
-    local result curl_ip_flag service_name rest ipv4 ipv6
+  local ip_version="$1"
+  local result
 
-    if [[ "$ip_version" == "4" ]]; then
-        curl_ip_flag="-4"
-    elif [[ "$ip_version" == "6" ]]; then
-        curl_ip_flag="-6"
-    else
-        curl_ip_flag="-4"
-    fi
-	
-	result=$(make_request GET "https://www.youtube.com" --ip-version "$ip_version" --user-agent "$USER_AGENT" \
-        | grep -oP '"countryCode":"\K\w+')
-	
-    if [[ -z "$result" || "$result" == "null" || "$result" == "n/a" || ${#result} -gt 7 ]]; then
-        for entry in "${ARR_CUSTOM[@]}"; do
-            service_name="${entry%%|||*}"
-            if [[ "$service_name" == "Google" ]]; then
-                rest="${entry#*|||}"
-                ipv4="${rest%%|||*}"
-                ipv6="${rest#*|||}"
+  result=$(make_request GET "https://www.youtube.com" --ip-version "$ip_version" --user-agent "$USER_AGENT" \
+    | grep -oP '"countryCode":"\K\w+' | head -n 1)
 
-                if [[ "$ip_version" == "4" ]]; then
-                    result="$ipv4"
-                else
-                    result="$ipv6"
-                fi
+  # YouTube and Google share the region; ask Google when the page has no country
+  if [[ ! "$result" =~ ^[A-Z]{2}$ ]]; then
+    result=$(lookup_google "$ip_version")
+  fi
 
-                break
-            fi
-        done
-		#result=$(lookup_google "$ip_version")
-    fi
-
-    echo "$result"
+  echo "$result"
 }
 
 
@@ -2081,22 +2178,21 @@ lookup_google_search_captcha() {
 
 lookup_bing() {
   local ip_version="$1"
+  local response region
 
-  local tmpresult=$(make_request GET "https://www.bing.com/search?q=cats" --follow --ip-version "$ip_version" --user-agent "$USER_AGENT")
-  
-  local isCN=$(echo "$tmpresult" | grep 'cn.bing.com')
-  local region=$(echo "$tmpresult" | grep -woP 'Region\s{0,}:\s{0,}"\K[^"]+')
-  
-  if [ -n "$isCN" ]; then
+  response=$(make_request GET "https://www.bing.com/search?q=cats" --follow --ip-version "$ip_version" --user-agent "$USER_AGENT")
+  region=$(grep -woP 'Region\s{0,}:\s{0,}"\K[^"]+' <<<"$response" | head -n 1)
+
+  if grep -q 'cn.bing.com' <<<"$response"; then
     region='CN'
   fi
-  
+
   region="${region:0:2}"
 
   # WW (worldwide), XL (Latin America) and other market codes are not countries
   if [[ -z "$region" || "$region" == "WW" || "$region" == "EU" || -z "${COUNTRY_NAMES[$region]+x}" ]]; then
-	tmpresult=$(make_request GET "https://login.live.com" --ip-version "$ip_version" --user-agent "$USER_AGENT")
-	region=$(echo "$tmpresult" | grep -oP '"sRequestCountry":"\K[^"]*' | head -n1)
+    response=$(make_request GET "https://login.live.com" --ip-version "$ip_version" --user-agent "$USER_AGENT")
+    region=$(grep -oP '"sRequestCountry":"\K[^"]*' <<<"$response" | head -n 1)
   fi
 
   echo "$region"
@@ -2128,13 +2224,12 @@ lookup_spotify_signup() {
 
 lookup_amazon_prime() {
   local ip_version="$1"
+  local response region
 
-  local tmpresult=$(make_request GET "https://www.primevideo.com" --follow --ip-version "$ip_version" --user-agent "$USER_AGENT")
+  response=$(make_request GET "https://www.primevideo.com" --follow --ip-version "$ip_version" --user-agent "$USER_AGENT")
+  region=$(grep -woP '"currentTerritory":"\K[^"]+' <<<"$response" | head -n 1)
 
-  local isBlocked=$(echo "$tmpresult" | grep -i 'isServiceRestricted')
-  local region=$(echo "$tmpresult" | grep -woP '"currentTerritory":"\K[^"]+' | head -n 1)
-
-  if [[ -n "$isBlocked" ]]; then
+  if grep -qi 'isServiceRestricted' <<<"$response"; then
     print_value_or_colored "No" "HEART"
   else
     echo "${region:0:2}"
@@ -2243,11 +2338,12 @@ check_doh() {
 
     local curl_opts=(-s --max-time 5 --connect-timeout 2 -o /dev/null)
 
-    local entry name doh_url test_url
+    local entry name doh_url
+
+    SELECTED_DOH_ARGS=()
 
     # With a SOCKS5 proxy the proxy resolves names itself (socks5h), DoH is not needed
     if [[ -n "$PROXY_ADDR" ]]; then
-        SELECTED_DOH_URL=""
         return 0
     fi
 
@@ -2256,15 +2352,15 @@ check_doh() {
     fi
 
     for entry in "${resolvers[@]}"; do
-        IFS="|" read -r name doh_url test_url <<<"$entry"
+        IFS="|" read -r name doh_url _ <<<"$entry"
 
         if curl "${curl_opts[@]}" --doh-url "$doh_url" "https://$test_domain/" 2>/dev/null; then
-            SELECTED_DOH_URL="--doh-url ${doh_url}"
+            log "$LOG_INFO" "Using DoH resolver: $name"
+            SELECTED_DOH_ARGS=(--doh-url "$doh_url")
             return 0
         fi
     done
 
-    SELECTED_DOH_URL=""
     return 1
 }
 
@@ -2273,9 +2369,8 @@ main() {
 
   install_dependencies
   check_doh
-  
+
   check_ip_support 4
-  IPV4_SUPPORTED=$?
 
   check_ip_support 6
   IPV6_SUPPORTED=$?
@@ -2283,26 +2378,17 @@ main() {
   get_external_ip
   get_asn
 
-
   if [[ "$JSON_OUTPUT" != true && "$VERBOSE" != true ]]; then
     trap 'spinner_stop; exit' INT TERM
     spinner_start
   fi
 
   case "$GROUPS_TO_SHOW" in
-    custom)
-      run_service_group "custom"
-      ;;
-    primary)
-      run_service_group "primary"
-      ;;
-    cdn)
-      run_service_group "cdn"
+    custom | primary | cdn)
+      run_service_groups "$GROUPS_TO_SHOW"
       ;;
     *)
-	  run_service_group "custom"
-      run_service_group "primary"
-      run_service_group "cdn"
+      run_service_groups custom primary cdn
       ;;
   esac
 

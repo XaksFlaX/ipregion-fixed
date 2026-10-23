@@ -1,8 +1,56 @@
 # ipregion-fixed
 
+**English** | [Русский](README.ru.md)
+
 A bash script for determining your IP geolocation using various GeoIP services and popular websites.  
 This is a fork of [Davoyan/ipregion](https://github.com/Davoyan/ipregion) (itself a fork of the [original script](https://github.com/vernette/ipregion/))
-that fixes proxy leaks, unattended package installs and several broken lookups. Details below.
+that fixes proxy leaks and unattended package installs, adds availability checks for ChatGPT, Claude, Netflix and Disney+,
+and runs the checks in parallel. Details below.
+
+## Usage
+Run directly from GitHub:
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/XaksFlaX/ipregion-fixed/main/ipregion.sh)
+```
+Safer: download a specific commit, check it, then run it as a regular user:
+```bash
+curl -fsSL https://raw.githubusercontent.com/XaksFlaX/ipregion-fixed/<commit>/ipregion.sh -o ipregion.sh
+less ipregion.sh
+bash ipregion.sh
+```
+
+Output example (screenshot of Davoyan's version; this fork prints the same table with a few more rows):
+
+![image](https://i.imgur.com/Bn1o644.png)
+
+## What is new in this fork
+
+### Availability checks
+
+| Row | Values | How it is decided |
+|---|---|---|
+| ChatGPT Access | `Yes` / `No` | `api.openai.com` answers `403 unsupported_country_region_territory` where ChatGPT is not offered |
+| Claude Access | `Yes` / `No` | without a key the Anthropic API answers `401` in supported regions and `403 Request not allowed` elsewhere |
+| Netflix Catalog | `Full` / `Originals only` | two licensed titles are opened; if both are missing while a control title opens, Netflix shows only its own titles (region or proxy detection) |
+| Disney+ | country / `No` | Disney+ device registration reports whether the location is supported and which country it sees |
+
+Gemini is not checked: Google returns the same page in supported and unsupported countries, so there is no reliable signal.
+
+### A reason instead of `N/A`
+
+When a check gets no answer, the row shows why:
+
+- `Blocked` — the service answered HTTP 403 (for Reddit: its "blocked by network security" page, typical for datacenter IPs);
+- `RateLimited` — HTTP 429, too many requests from this IP;
+- `Timeout` — no answer in time;
+- `N/A` — anything else (network error, changed API).
+
+### Faster
+
+Checks run 6 at a time (`-P N` to change, `-P 1` for one by one). On our servers a full run went from 20–46 s down to 10–17 s
+with exactly the same results.
+
+The version is printed in the header and in JSON (`script_version`).
 
 ## What is fixed
 
@@ -19,27 +67,11 @@ Compared to [Davoyan/ipregion@a85abbf](https://github.com/Davoyan/ipregion/blob/
 - **External IP is confirmed by two different services** (`ifconfig.me` was listed twice; the second one is now `icanhazip.com`).
 - **Fixed lookups:** Amazon Prime blocking detection, 2ip.io request, ipapi.is (the API now returns only the country name),
   Bing market codes such as `XL` and `WW` (falls back to login.live.com), YouTube CDN node names like `tzfraa-cd`.
+- **Reddit shows `Blocked`** instead of an empty value when Reddit answers with its block page. From residential IPs it shows the country.
 - **ipapi.co is excluded:** it answers `429 RateLimited` to datacenter IPs.
-- The temporary file is removed in `-j`/`-v` mode too.
-
-- **Reddit shows `Blocked` instead of `N/A`** when Reddit answers with its block page
-  (HTTP 403 "blocked by network security", typical for datacenter IPs). From residential IPs it shows the country.
-
-## Usage
-Run directly from GitHub:
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/XaksFlaX/ipregion-fixed/main/ipregion.sh)
-```
-Safer: download a specific commit, check it, then run it as a regular user:
-```bash
-curl -fsSL https://raw.githubusercontent.com/XaksFlaX/ipregion-fixed/<commit>/ipregion.sh -o ipregion.sh
-less ipregion.sh
-bash ipregion.sh
-```
-
-Output example:
-
-![image](https://i.imgur.com/Bn1o644.png)
+- The legend counts only country codes, so `Yes`, `No`, `Blocked` and similar values never appear as "countries".
+- The temporary files are removed in every mode; dead code is gone.
+- [ShellCheck](https://www.shellcheck.net/) runs on every push (GitHub Actions).
 
 ## What Davoyan's fork added
 
@@ -113,6 +145,9 @@ For manual lookup of codes, you can use the official ISO website: [https://www.i
 # Set custom curl request timeout in seconds
 ./ipregion.sh --timeout 20
 
+# Check services one by one instead of 6 at a time
+./ipregion.sh --parallel 1
+
 # Output result as JSON
 ./ipregion.sh --json
 
@@ -139,6 +174,7 @@ Options:
   -6, --ipv6           Test only IPv6
   -p, --proxy ADDR     Use SOCKS5 proxy (format: host:port)
   -i, --interface IF   Use specified network interface (e.g. eth1)
+  -P, --parallel N     Check N services at a time (default: 6, 1 = one by one)
 
 Examples:
   ipregion.sh                       # Check all services with default settings
@@ -151,4 +187,9 @@ Examples:
   ipregion.sh -i eth1               # Use network interface eth1
   ipregion.sh -j                    # Output result as JSON
   ipregion.sh -v                    # Enable verbose logging
+  ipregion.sh -P 1                  # Check services one by one
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE). Copyright of the original script: Nikita Skryabin (vernette).
