@@ -4,8 +4,9 @@
 
 A bash script for determining your IP geolocation using various GeoIP services and popular websites.  
 This is a fork of [Davoyan/ipregion](https://github.com/Davoyan/ipregion) (itself a fork of the [original script](https://github.com/vernette/ipregion/))
-that fixes proxy leaks and unattended package installs, adds availability checks for ChatGPT, Claude and Netflix,
-brings back the Disney+ check of the original script and runs the checks in parallel. Details below.
+that fixes proxy leaks and unattended package installs, adds availability checks for ChatGPT, Claude, Gemini, Copilot
+and Netflix, brings back the Disney+ check of the original script, shows whether the IP is flagged as hosting or VPN
+and which DNS resolver it uses, ends with a short summary and runs the checks in parallel. Details below.
 
 ## Usage
 Run directly from GitHub:
@@ -21,7 +22,8 @@ bash ipregion.sh
 
 ### Output example
 
-A VPS in Moldova, version 2026.10.23.2 (IP addresses and ASN are hidden):
+A VPS in Moldova, version 2026.10.23.2 (IP addresses and ASN are hidden). Newer versions also print the Gemini and Copilot rows,
+the [IP reputation and DNS block](#ip-reputation-and-dns) and the [summary](#summary) after the table:
 
 ![Example output of ipregion-fixed](docs/example-output.png)
 
@@ -47,11 +49,39 @@ How to read it:
 | Claude Access | `Yes` / `No` | without a key the Anthropic API answers `401` in supported regions and `403 Request not allowed` elsewhere |
 | Netflix Catalog | `Full` / `Originals only` | two licensed titles are opened; if both are missing while a control title opens, Netflix shows only its own titles (region or proxy detection) |
 | Disney+ | country / `No` | Disney+ device registration reports whether the location is supported and which country it sees; `No` also when Disney refuses this IP with "Forbidden location" (seen for hosting IPs even in countries where Disney+ works) |
+| Gemini Access | `Yes` / `No` | the country Google sees, looked up in Google's [list of regions where the Gemini API is available](https://ai.google.dev/gemini-api/docs/available-regions) (downloaded on each run) |
+| Copilot Access | `Yes` / `No` | `copilot.microsoft.com` is behind Cloudflare, which answers `error code: 1009` (country banned) where Copilot is not offered |
 
-Disney+ was in the [original script](https://github.com/vernette/ipregion/) and was dropped in Davoyan's fork; this fork brings it back
-with the same request. The original also checks Gemini, against Google's published list of supported countries.
-This fork has no Gemini row: the Gemini page itself looks the same in supported and unsupported countries,
-and a country list kept in the script would need its own updates.
+Disney+ and Gemini come from the [original script](https://github.com/vernette/ipregion/) (both were dropped in Davoyan's fork):
+Disney+ uses the same request, Gemini the same idea (Google's region list, names compared word by word) without the extra
+downloads of CLDR names. Perplexity is not checked: its API answers the same from Russia and from the Netherlands,
+and its site is behind bot protection, so there is no regional signal.
+
+### IP reputation and DNS
+
+Most refusals (Reddit, Disney+, Netflix showing only its own titles) are not about the country but about the IP being
+a hosting or VPN address. A block after the CDN rows shows how the IP is seen:
+
+| Row | Values | Source |
+|---|---|---|
+| Network type (ipinfo) | `Hosting` / `ISP` / `Business` / `Education` | ipinfo.io (the same free widget as the ipinfo.io row) |
+| VPN/Proxy (ipinfo) | `No` / `VPN`, `Proxy`, `Tor`, `Relay` | ipinfo.io |
+| Hosting (ip-api) | `Yes` / `No` | ip-api.com |
+| VPN/Proxy (proxycheck) | `No` / `VPN` / `Proxy` / … | proxycheck.io (free: 100 queries a day per IP) |
+| DNS resolver | country and provider, e.g. `DE Google` | edns.ip-api.com: which resolver looked up a random name. The script's own DoH is bypassed here, so this is the system resolver (or the proxy's one with `-p`) |
+
+### Summary
+
+After the legend the script prints a short verdict for each IP version:
+
+```text
+Summary (IPv4)
+Works           Google Search, YouTube Premium, ChatGPT, Claude, Gemini, Copilot, Netflix, Disney+, Spotify
+Not available   Reddit
+IP flagged as   Hosting (ipinfo), Hosting (ip-api), VPN (proxycheck)
+```
+
+`Not checked` lists the services that gave no answer (N/A, Timeout, RateLimited).
 
 ### A reason instead of `N/A`
 
@@ -157,6 +187,9 @@ bash ipregion.sh --group primary
 # Check only CDN services
 bash ipregion.sh --group cdn
 
+# Check only hosting/VPN flags and the DNS resolver
+bash ipregion.sh --group network
+
 # Check only popular web services
 bash ipregion.sh --group custom
 
@@ -198,7 +231,7 @@ Options:
   -h, --help           Show this help message and exit
   -v, --verbose        Enable verbose logging
   -j, --json           Output results in JSON format
-  -g, --group GROUP    Run only one group: 'primary', 'custom', 'cdn', or 'all' (default: all)
+  -g, --group GROUP    Run only one group: 'primary', 'custom', 'cdn', 'network', or 'all' (default: all)
   -t, --timeout SEC    Set curl request timeout in seconds (default: 6)
   -4, --ipv4           Test only IPv4
   -6, --ipv6           Test only IPv6
@@ -212,6 +245,7 @@ Examples:
   ipregion.sh -g primary          # Check only GeoIP services
   ipregion.sh -g custom           # Check only popular websites
   ipregion.sh -g cdn              # Check only CDN endpoints
+  ipregion.sh -g network          # Check only hosting/VPN flags and the DNS resolver
   ipregion.sh -4                  # Test only IPv4
   ipregion.sh -6                  # Test only IPv6
   ipregion.sh -p 127.0.0.1:1080   # Use SOCKS5 proxy

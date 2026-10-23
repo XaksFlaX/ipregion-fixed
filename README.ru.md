@@ -3,11 +3,12 @@
 [English](README.md) | **Русский**
 
 Bash-скрипт, который показывает, в какой стране ваш IP-адрес «видят» разные GeoIP-базы и популярные сервисы.
-Удобно для проверки VPN и VPS: сразу видно, откроются ли YouTube Premium, ChatGPT, Claude, Netflix и другие.
+Удобно для проверки VPN и VPS: сразу видно, откроются ли YouTube Premium, ChatGPT, Claude, Gemini, Netflix и другие.
 
 Это форк [Davoyan/ipregion](https://github.com/Davoyan/ipregion), который, в свою очередь, форк [оригинального скрипта](https://github.com/vernette/ipregion/).
-Здесь исправлены утечки мимо прокси и установка пакетов без спроса, добавлены проверки доступности ChatGPT, Claude и Netflix,
-возвращена проверка Disney+ из оригинала, а проверки идут параллельно. Подробности ниже.
+Здесь исправлены утечки мимо прокси и установка пакетов без спроса, добавлены проверки доступности ChatGPT, Claude, Gemini,
+Copilot и Netflix, возвращена проверка Disney+ из оригинала. Скрипт показывает, считается ли IP хостингом или VPN и какой
+DNS-резолвер используется, а в конце печатает короткий итог. Проверки идут параллельно. Подробности ниже.
 
 ## Запуск
 
@@ -25,7 +26,8 @@ bash ipregion.sh
 
 ### Пример вывода
 
-VPS в Молдове, версия 2026.10.23.2 (IP-адреса и ASN скрыты):
+VPS в Молдове, версия 2026.10.23.2 (IP-адреса и ASN скрыты). Новые версии дополнительно выводят строки Gemini и Copilot,
+[блок репутации IP и DNS](#репутация-ip-и-dns) и [итог](#итог) после таблицы:
 
 ![Пример вывода ipregion-fixed](docs/example-output.png)
 
@@ -52,9 +54,40 @@ VPS в Молдове, версия 2026.10.23.2 (IP-адреса и ASN скр�
 | Netflix Catalog | `Full` / `Originals only` | открываются два лицензионных тайтла; если обоих нет, а контрольный открывается, Netflix показывает только свои сериалы (так бывает в некоторых странах и для IP, которые он считает прокси) |
 | Disney+ | страна / `No` | регистрация устройства Disney+ сообщает, поддерживается ли регион и какую страну видит сервис; `No` и тогда, когда Disney отказывает этому IP с ошибкой «Forbidden location» (так бывает с IP хостеров даже в странах, где Disney+ работает) |
 
-Disney+ был в [оригинальном скрипте](https://github.com/vernette/ipregion/), в форке Davoyan его убрали; здесь он возвращён с тем же запросом.
-В оригинале есть и проверка Gemini — по опубликованному Google списку стран. Здесь строки Gemini нет: сама страница Gemini
-выглядит одинаково и там, где он доступен, и там, где нет, а список стран внутри скрипта пришлось бы отдельно обновлять.
+| Gemini Access | `Yes` / `No` | страна, которую видит Google, ищется в официальном [списке регионов, где доступен Gemini API](https://ai.google.dev/gemini-api/docs/available-regions) (скачивается при каждом запуске) |
+| Copilot Access | `Yes` / `No` | `copilot.microsoft.com` стоит за Cloudflare, который отвечает `error code: 1009` («доступ из страны запрещён») там, где Copilot не работает |
+
+Disney+ и Gemini взяты из [оригинального скрипта](https://github.com/vernette/ipregion/) (в форке Davoyan обе проверки убрали):
+Disney+ — с тем же запросом, Gemini — с той же идеей (список регионов Google, сравнение названий по словам), но без скачивания
+словаря названий CLDR. Perplexity не проверяется: его API отвечает одинаково из России и из Нидерландов, а сайт закрыт
+защитой от ботов, так что признака региона нет.
+
+### Репутация IP и DNS
+
+Большинство отказов (Reddit, Disney+, Netflix только со своими сериалами) связаны не со страной, а с тем, что IP принадлежит
+хостеру или считается VPN. После строк CDN идёт блок, который показывает, как видят IP:
+
+| Строка | Значения | Источник |
+|---|---|---|
+| Network type (ipinfo) | `Hosting` / `ISP` / `Business` / `Education` | ipinfo.io (тот же бесплатный виджет, что и в строке ipinfo.io) |
+| VPN/Proxy (ipinfo) | `No` / `VPN`, `Proxy`, `Tor`, `Relay` | ipinfo.io |
+| Hosting (ip-api) | `Yes` / `No` | ip-api.com |
+| VPN/Proxy (proxycheck) | `No` / `VPN` / `Proxy` / … | proxycheck.io (бесплатно: 100 запросов в сутки с одного IP) |
+| DNS resolver | страна и провайдер, например `DE Google` | edns.ip-api.com: какой резолвер запросил случайное имя. Собственный DoH скрипта здесь не используется, поэтому это системный резолвер (или резолвер прокси при `-p`) |
+
+### Итог
+
+После легенды скрипт печатает короткий вывод по каждому протоколу:
+
+```text
+Summary (IPv4)
+Works           Google Search, YouTube Premium, ChatGPT, Claude, Gemini, Copilot, Netflix, Disney+, Spotify
+Not available   Reddit
+IP flagged as   Hosting (ipinfo), Hosting (ip-api), VPN (proxycheck)
+```
+
+`Works` — работает, `Not available` — не работает, `Not checked` — сервис не дал ответа (N/A, Timeout, RateLimited),
+`IP flagged as` — кем и как помечен IP.
 
 ### Причина вместо `N/A`
 
@@ -158,6 +191,9 @@ bash ipregion.sh --group primary
 # Только CDN
 bash ipregion.sh --group cdn
 
+# Только репутация IP (хостинг/VPN) и DNS-резолвер
+bash ipregion.sh --group network
+
 # Только популярные сервисы
 bash ipregion.sh --group custom
 
@@ -197,7 +233,7 @@ Options:
   -h, --help           Справка
   -v, --verbose        Подробный журнал
   -j, --json           Вывод в JSON
-  -g, --group GROUP    Только одна группа: 'primary', 'custom', 'cdn' или 'all' (по умолчанию all)
+  -g, --group GROUP    Только одна группа: 'primary', 'custom', 'cdn', 'network' или 'all' (по умолчанию all)
   -t, --timeout SEC    Время ожидания ответа в секундах (по умолчанию 6)
   -4, --ipv4           Только IPv4
   -6, --ipv6           Только IPv6

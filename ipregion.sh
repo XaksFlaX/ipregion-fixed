@@ -4,7 +4,7 @@
 shopt -s extglob
 
 # YYYY.MM.DD.N, N = change of the day. Bump on every change of this file (CI checks it)
-SCRIPT_VERSION="2026.10.23.3"
+SCRIPT_VERSION="2026.10.23.4"
 SCRIPT_URL="https://github.com/XaksFlaX/ipregion-fixed"
 DEPENDENCIES=("jq" "curl" "util-linux")
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
@@ -15,6 +15,28 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 
 SPOTIFY_API_KEY="142b583129b2df829de3656f9eb484e6"
 SPOTIFY_CLIENT_ID="9a8d2f0ce77a4e248bb71fefcb557637"
+
+# Google's list of regions where the Gemini API is available, one "- Country" per line
+GEMINI_REGIONS_URL="https://ai.google.dev/gemini-api/docs/available-regions.md.txt"
+
+# Countries whose name in Google's list differs from COUNTRY_NAMES word by word
+declare -A GEMINI_REGION_NAMES=(
+  [TR]="Türkiye"
+  [VA]="Vatican City"
+  [LA]="Laos"
+  [BQ]="Caribbean Netherlands"
+)
+
+# True when $name matches a "- Region" line of $md: one set of significant words contains the other
+# ("Korea (Republic of)" matches "South Korea", "Congo" matches "Republic of the Congo")
+GEMINI_MATCH_FILTER='
+  def stopwords: ["the", "of", "and", "republic", "island", "islands", "saint", "st"];
+  def words: ascii_downcase | [splits("[^\\p{L}]+")] | map(select(. != "" and (IN(stopwords[]) | not))) | unique;
+  ($name | words) as $wanted
+  | ($wanted | length) > 0
+    and ([$md | split("\n")[] | select(startswith("- ")) | .[2:] | words]
+         | any(. as $region | (($wanted - $region) | length) == 0 or (($region - $wanted) | length) == 0))
+'
 
 # Public key of the Disney+ Android app, as used by vernette/ipregion
 DISNEY_PLUS_API_KEY="ZGlzbmV5JmFuZHJvaWQmMS4wLjA.bkeb0m230uUhv8qrAXuNu39tbE_mD5EEhM_NAcohjyA"
@@ -39,6 +61,7 @@ RESULT_JSON=""
 ARR_PRIMARY=()
 ARR_CUSTOM=()
 ARR_CDN=()
+ARR_NETWORK=()
 
 COLOR_HEADER="1;36"
 COLOR_SERVICE="0;92"
@@ -380,6 +403,8 @@ declare -A CUSTOM_SERVICES=(
   [CHATGPT]="ChatGPT"
   [CHATGPT_ACCESS]="ChatGPT Access"
   [CLAUDE_ACCESS]="Claude Access"
+  [GEMINI_ACCESS]="Gemini Access"
+  [COPILOT_ACCESS]="Copilot Access"
   [NETFLIX]="Netflix"
   [NETFLIX_CATALOG]="Netflix Catalog"
   [DISNEY_PLUS]="Disney+"
@@ -408,6 +433,8 @@ CUSTOM_SERVICES_ORDER=(
   "CHATGPT"
   "CHATGPT_ACCESS"
   "CLAUDE_ACCESS"
+  "GEMINI_ACCESS"
+  "COPILOT_ACCESS"
   "NETFLIX"
   "NETFLIX_CATALOG"
   "DISNEY_PLUS"
@@ -436,6 +463,8 @@ declare -A CUSTOM_SERVICES_HANDLERS=(
   [CHATGPT]="lookup_chatgpt"
   [CHATGPT_ACCESS]="lookup_chatgpt_access"
   [CLAUDE_ACCESS]="lookup_claude_access"
+  [GEMINI_ACCESS]="lookup_gemini_access"
+  [COPILOT_ACCESS]="lookup_copilot_access"
   [NETFLIX]="lookup_netflix"
   [NETFLIX_CATALOG]="lookup_netflix_catalog"
   [DISNEY_PLUS]="lookup_disney_plus"
@@ -454,6 +483,11 @@ declare -A CUSTOM_SERVICES_HANDLERS=(
   [OOKLA_SPEEDTEST]="lookup_ookla_speedtest"
   [JETBRAINS]="lookup_jetbrains"
   [BING]="lookup_bing"
+  [IPINFO_TYPE]="lookup_ipinfo_type"
+  [IPINFO_PRIVACY]="lookup_ipinfo_privacy"
+  [IPAPI_HOSTING]="lookup_ipapi_hosting"
+  [PROXYCHECK]="lookup_proxycheck"
+  [DNS_RESOLVER]="lookup_dns_resolver"
 )
 
 declare -A CDN_SERVICES=(
@@ -466,10 +500,28 @@ CDN_SERVICES_ORDER=(
   "NETFLIX_CDN"
 )
 
+# How the IP itself is seen: hosting, VPN or proxy flags and the DNS resolver in use
+declare -A NETWORK_SERVICES=(
+  [IPINFO_TYPE]="Network type (ipinfo)"
+  [IPINFO_PRIVACY]="VPN/Proxy (ipinfo)"
+  [IPAPI_HOSTING]="Hosting (ip-api)"
+  [PROXYCHECK]="VPN/Proxy (proxycheck)"
+  [DNS_RESOLVER]="DNS resolver"
+)
+
+NETWORK_SERVICES_ORDER=(
+  "IPINFO_TYPE"
+  "IPINFO_PRIVACY"
+  "IPAPI_HOSTING"
+  "PROXYCHECK"
+  "DNS_RESOLVER"
+)
+
 declare -A SERVICE_GROUPS=(
   [primary]="${PRIMARY_SERVICES_ORDER[*]}"
   [custom]="${CUSTOM_SERVICES_ORDER[*]}"
   [cdn]="${CDN_SERVICES_ORDER[*]}"
+  [network]="${NETWORK_SERVICES_ORDER[*]}"
 )
 
 EXCLUDED_SERVICES=(
@@ -563,7 +615,7 @@ Options:
   -h, --help           Show this help message and exit
   -v, --verbose        Enable verbose logging
   -j, --json           Output results in JSON format
-  -g, --group GROUP    Run only one group: 'primary', 'custom', 'cdn', or 'all' (default: all)
+  -g, --group GROUP    Run only one group: 'primary', 'custom', 'cdn', 'network', or 'all' (default: all)
   -t, --timeout SEC    Set curl request timeout in seconds (default: $CURL_TIMEOUT)
   -4, --ipv4           Test only IPv4
   -6, --ipv6           Test only IPv6
@@ -577,6 +629,7 @@ Examples:
   ipregion.sh -g primary          # Check only GeoIP services
   ipregion.sh -g custom           # Check only popular websites
   ipregion.sh -g cdn              # Check only CDN endpoints
+  ipregion.sh -g network          # Check only hosting/VPN flags and the DNS resolver
   ipregion.sh -4                  # Test only IPv4
   ipregion.sh -6                  # Test only IPv6
   ipregion.sh -p 127.0.0.1:1080   # Use SOCKS5 proxy
@@ -1072,7 +1125,10 @@ make_request() {
   fi
 
   # --with-status: print the body and the HTTP code on the last line, 403/429 included
+  # --system-dns: resolve with the system (or proxy) resolver, not with the DoH one
   local with_status=false
+  local system_dns=false
+  local doh_args=()
 
   while (($#)); do
     case "$1" in
@@ -1086,6 +1142,10 @@ make_request() {
         ;;
       --with-status)
         with_status=true
+        shift
+        ;;
+      --system-dns)
+        system_dns=true
         shift
         ;;
       --user-agent)
@@ -1142,7 +1202,11 @@ make_request() {
 
   curl_args+=("$url")
 
-  response_with_code=$(timeout "$CURL_TIMEOUT"s curl "${curl_args[@]}" "${SELECTED_DOH_ARGS[@]}")
+  if [[ "$system_dns" != true ]]; then
+    doh_args=("${SELECTED_DOH_ARGS[@]}")
+  fi
+
+  response_with_code=$(timeout "$CURL_TIMEOUT"s curl "${curl_args[@]}" "${doh_args[@]}")
   local exit_status=$?
 
   http_code=$(tail -n1 <<<"$response_with_code")
@@ -1408,11 +1472,11 @@ process_custom_service() {
   local service="$2"
   local ipv4_result ipv6_result display_name handler_func="${CUSTOM_SERVICES_HANDLERS[$service]}"
 
-  if [[ "$group" == "cdn" ]]; then
-    display_name="${CDN_SERVICES[$service]:-$service}"
-  else
-    display_name="${CUSTOM_SERVICES[$service]:-$service}"
-  fi
+  case "$group" in
+    cdn) display_name="${CDN_SERVICES[$service]:-$service}" ;;
+    network) display_name="${NETWORK_SERVICES[$service]:-$service}" ;;
+    *) display_name="${CUSTOM_SERVICES[$service]:-$service}" ;;
+  esac
 
   set_spinner_text "$display_name"
 
@@ -1503,7 +1567,7 @@ run_service_groups() {
 }
 
 finalize_json() {
-  local t_primary t_custom t_cdn
+  local t_primary t_custom t_cdn t_network
   local IFS=$'\n'
 
   if ((${#ARR_PRIMARY[@]} > 0)); then
@@ -1518,11 +1582,16 @@ finalize_json() {
     t_cdn=$(printf '%s\n' "${ARR_CDN[@]//|||/$'\t'}")
   fi
 
+  if ((${#ARR_NETWORK[@]} > 0)); then
+    t_network=$(printf '%s\n' "${ARR_NETWORK[@]//|||/$'\t'}")
+  fi
+
   RESULT_JSON=$(
     jq -n \
       --rawfile p <(printf "%s" "$t_primary") \
       --rawfile c <(printf "%s" "$t_custom") \
       --rawfile d <(printf "%s" "$t_cdn") \
+      --rawfile n <(printf "%s" "$t_network") \
       --arg ipv4 "$EXTERNAL_IPV4" \
       --arg ipv6 "$EXTERNAL_IPV6" \
       --arg version "1" \
@@ -1551,7 +1620,8 @@ finalize_json() {
           results: {
             primary: lines_to_array($p),
             custom:  lines_to_array($c),
-            cdn:     lines_to_array($d)
+            cdn:     lines_to_array($d),
+            network: lines_to_array($n)
           }
         }
       '
@@ -1579,6 +1649,7 @@ add_result() {
     primary) ARR_PRIMARY+=("$service|||$ipv4|||$ipv6") ;;
     custom) ARR_CUSTOM+=("$service|||$ipv4|||$ipv6") ;;
     cdn) ARR_CDN+=("$service|||$ipv4|||$ipv6") ;;
+    network) ARR_NETWORK+=("$service|||$ipv4|||$ipv6") ;;
   esac
 }
 
@@ -1834,19 +1905,86 @@ print_results() {
   print_header
 
   case "$GROUPS_TO_SHOW" in
-    primary | custom | cdn)
+    primary | custom | cdn | network)
       print_table_group "$GROUPS_TO_SHOW"
       ;;
     *)
       print_table_group "custom"
       print_table_group "primary" false
-      # CDN rows show where the nearest video node is, not where the IP is: not in the legend
+      # CDN and network rows are not countries of the IP: not in the legend
       print_table_group "cdn" false
+      print_table_group "network" false
       print_legend
+      print_summary
       ;;
   esac
 
   print_update_notice "$LATEST_VERSION"
+}
+
+# Turns the availability rows of the popular services and the network flags into lines
+# "kind<TAB>list": works, blocked, unknown, flags
+SUMMARY_FILTER='
+  def plain: tostring | gsub("\u001b\\[[0-9;]*m"; "");
+  def names: {
+    "Google Search Captcha": "Google Search", "YouTube Premium": "YouTube Premium",
+    "YouTube Music": "YouTube Music", "ChatGPT Access": "ChatGPT", "Claude Access": "Claude",
+    "Gemini Access": "Gemini", "Copilot Access": "Copilot", "Netflix Catalog": "Netflix",
+    "Disney+": "Disney+", "Spotify Signup": "Spotify", "Reddit": "Reddit", "Amazon Prime": "Prime Video"
+  };
+  def kind:
+    if .service == "Google Search Captcha" then
+      (if .value == "No" then "works" elif .value == "Yes" then "blocked" else "unknown" end)
+    elif .value == "Yes" or .value == "Full" or (.value | test("^[A-Z]{2}$")) then "works"
+    elif .value == "No" or .value == "Blocked" or .value == "Originals only" then "blocked"
+    else "unknown" end;
+  def row_label:
+    if .service == "Netflix Catalog" and .value == "Originals only" then "Netflix (Originals only)"
+    elif .service == "Google Search Captcha" and .value == "Yes" then "Google Search (captcha)"
+    else names[.service] end;
+
+  ([ (.results.custom // [])[] | select(names[.service]) | {service, value: ((.[$v] // "") | plain)} ]
+    | map({kind: kind, label: row_label})) as $rows
+  | ([ (.results.network // [])[] | select(.service != "DNS resolver")
+       | {service, value: ((.[$v] // "") | plain)}
+       | select(.value != "" and .value != "No" and .value != "ISP" and .value != "N/A"
+                and .value != "null" and .value != "Timeout" and .value != "RateLimited")
+       | (if .value == "Yes" then (.service | sub(" \\(.*"; "")) else .value end)
+         + " (" + (.service | capture("\\((?<s>[^)]*)\\)").s // "") + ")" ]) as $flags
+  | ($rows | map(select(.kind == "works") | .label) | "works\t" + join(", ")),
+    ($rows | map(select(.kind == "blocked") | .label) | "blocked\t" + join(", ")),
+    ($rows | map(select(.kind == "unknown") | .label) | "unknown\t" + join(", ")),
+    ("flags\t" + ($flags | join(", ")))
+'
+
+# Short verdict after the table: what works from this IP and what does not, per IP version
+print_summary() {
+  local version label kind list title color_name
+
+  for version in ipv4 ipv6; do
+    if [[ "$version" == ipv4 ]]; then
+      [[ "$IPV6_ONLY" != true && -n "$EXTERNAL_IPV4" ]] || continue
+      label="IPv4"
+    else
+      [[ "$IPV4_ONLY" != true && -n "$EXTERNAL_IPV6" ]] || continue
+      label="IPv6"
+    fi
+
+    printf "\n%s\n" "$(color HEADER "Summary ($label)")"
+
+    while IFS=$'\t' read -r kind list; do
+      case "$kind" in
+        works) title="Works"; color_name="SERVICE" ;;
+        blocked) title="Not available"; color_name="HEART" ;;
+        unknown) title="Not checked"; color_name="NULL" ;;
+        flags) title="IP flagged as"; color_name="WARN"; list="${list:-nothing}" ;;
+      esac
+
+      [[ -z "$list" ]] && continue
+      print_cell "$(color TABLE_HEADER "$title")" 16
+      printf "%s\n" "$(color "$color_name" "$list")"
+    done < <(jq -r --arg v "$version" "$SUMMARY_FILTER" <<<"$RESULT_JSON")
+  done
 }
 
 lookup_cloudflare() {
@@ -2321,6 +2459,158 @@ lookup_amazon_prime() {
   fi
 }
 
+# Gemini: the country Google sees, looked up in Google's list of regions where the Gemini API
+# is available (the approach of vernette/ipregion). Names are compared word by word
+lookup_gemini_access() {
+  local ip_version="$1"
+  local country name regions
+
+  country=$(lookup_google "$ip_version")
+  if [[ ! "$country" =~ ^[A-Z]{2}$ ]]; then
+    return
+  fi
+
+  name="${GEMINI_REGION_NAMES[$country]:-${COUNTRY_NAMES[$country]}}"
+  regions=$(make_request GET "$GEMINI_REGIONS_URL" --ip-version "$ip_version")
+
+  if [[ -z "$name" ]] || ! grep -q '^- ' <<<"$regions"; then
+    return
+  fi
+
+  if jq -en --arg md "$regions" --arg name "$name" "$GEMINI_MATCH_FILTER" >/dev/null; then
+    print_value_or_colored "Yes" "SERVICE"
+  else
+    print_value_or_colored "No" "HEART"
+  fi
+}
+
+# copilot.microsoft.com sits behind Cloudflare, which answers "error code: 1009"
+# (access from this country is banned) where Copilot is not offered
+lookup_copilot_access() {
+  local ip_version="$1"
+  local response http_code
+
+  response=$(make_request GET "https://copilot.microsoft.com/" \
+    --ip-version "$ip_version" --user-agent "$USER_AGENT" --with-status)
+  http_code=$(tail -n1 <<<"$response")
+
+  if grep -q "error code: 1009" <<<"$response"; then
+    print_value_or_colored "No" "HEART"
+  elif [[ "$http_code" == "200" ]]; then
+    print_value_or_colored "Yes" "SERVICE"
+  fi
+}
+
+# Address checked in the "network" rows and the transport for the request: these services
+# take the address in the URL, so IPv4 transport works for an IPv6 address too
+external_ip_for() {
+  if [[ "$1" == "6" ]]; then
+    echo "$EXTERNAL_IPV6"
+  else
+    echo "$EXTERNAL_IPV4"
+  fi
+}
+
+network_transport() {
+  if [[ -n "$EXTERNAL_IPV4" && "$IPV6_ONLY" != true ]]; then
+    echo 4
+  else
+    echo 6
+  fi
+}
+
+ipinfo_widget() {
+  make_request GET "https://ipinfo.io/widget/demo/$(external_ip_for "$1")" --ip-version "$(network_transport)"
+}
+
+# Network type by ipinfo.io: hosting, isp, business, education
+lookup_ipinfo_type() {
+  local response type
+
+  response=$(ipinfo_widget "$1")
+  is_valid_json "$response" || return
+  type=$(process_json "$response" '.data.asn.type // .data.company.type // empty')
+
+  case "$type" in
+    hosting) print_value_or_colored "Hosting" "HEART" ;;
+    isp) print_value_or_colored "ISP" "SERVICE" ;;
+    "") ;;
+    *) echo "${type^}" ;;
+  esac
+}
+
+# VPN, proxy, Tor and relay flags by ipinfo.io
+lookup_ipinfo_privacy() {
+  local response flags
+
+  response=$(ipinfo_widget "$1")
+  is_valid_json "$response" || return
+  flags=$(process_json "$response" '
+    .data.privacy // empty
+    | [ (select(.vpn) | "VPN"), (select(.proxy) | "Proxy"), (select(.tor) | "Tor"), (select(.relay) | "Relay") ]
+    | if length == 0 then "No" else join(", ") end')
+
+  case "$flags" in
+    No) print_value_or_colored "No" "SERVICE" ;;
+    "") ;;
+    *) print_value_or_colored "$flags" "HEART" ;;
+  esac
+}
+
+# Hosting flag by ip-api.com (the same demo endpoint as the ip-api.com row)
+lookup_ipapi_hosting() {
+  local response
+
+  response=$(make_request GET "https://demo.ip-api.com/json/$(external_ip_for "$1")?fields=status,hosting" \
+    --ip-version "$(network_transport)" --header "Origin: https://ip-api.com")
+  is_valid_json "$response" || return
+
+  case "$(process_json "$response" '.hosting')" in
+    true) print_value_or_colored "Yes" "HEART" ;;
+    false) print_value_or_colored "No" "SERVICE" ;;
+  esac
+}
+
+# proxycheck.io: "VPN", "Proxy" and the like, or No. Free without a key: 100 queries a day per IP
+lookup_proxycheck() {
+  local ip response
+
+  ip=$(external_ip_for "$1")
+  response=$(make_request GET "https://proxycheck.io/v2/$ip?vpn=1&asn=1" --ip-version "$(network_transport)")
+  is_valid_json "$response" || return
+
+  if [[ "$(process_json "$response" '.status')" == "denied" ]]; then
+    print_value_or_colored "RateLimited" "NULL"
+    return
+  fi
+
+  case "$(jq -r --arg ip "$ip" '.[$ip].proxy // empty' <<<"$response")" in
+    yes) print_value_or_colored "$(jq -r --arg ip "$ip" '.[$ip].type // "Proxy"' <<<"$response")" "HEART" ;;
+    no) print_value_or_colored "No" "SERVICE" ;;
+  esac
+}
+
+# The resolver that looks up names for this host (or for the proxy, with -p): edns.ip-api.com
+# redirects to a random subdomain and reports which resolver asked for it. DoH is bypassed here
+lookup_dns_resolver() {
+  local response geo country org code
+
+  response=$(make_request GET "https://edns.ip-api.com/json" --follow --system-dns --ip-version "$1")
+  is_valid_json "$response" || return
+
+  geo=$(process_json "$response" '.dns.geo // empty')
+  country="${geo%% - *}"
+  org="${geo#* - }"
+  org="${org%%[ ,.]*}"
+  code=$(country_code_by_name "$country")
+
+  if [[ -n "$code" ]]; then
+    echo "$code $org"
+  elif [[ -n "$geo" ]]; then
+    echo "${org:-$country}"
+  fi
+}
+
 lookup_apple() {
   local ip_version="$1"
   make_request GET "https://gspe1-ssl.ls.apple.com/pep/gcc" --ip-version "$ip_version"
@@ -2470,11 +2760,11 @@ main() {
   fi
 
   case "$GROUPS_TO_SHOW" in
-    custom | primary | cdn)
+    custom | primary | cdn | network)
       run_service_groups "$GROUPS_TO_SHOW"
       ;;
     *)
-      run_service_groups custom primary cdn
+      run_service_groups custom primary cdn network
       ;;
   esac
 
