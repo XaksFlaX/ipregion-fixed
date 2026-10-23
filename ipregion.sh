@@ -1994,6 +1994,12 @@ lookup_disney_plus() {
     return
   fi
 
+  # Some hosting IPs get an error instead of a session: "... description 'Forbidden location'"
+  if grep -q "Forbidden location" <<<"$response"; then
+    print_value_or_colored "No" "HEART"
+    return
+  fi
+
   case "$(process_json "$response" ".extensions.sdk.session.inSupportedLocation")" in
     true)
       process_json "$response" ".extensions.sdk.session.location.countryCode"

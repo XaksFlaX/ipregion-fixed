@@ -32,7 +32,7 @@ Output example (screenshot of Davoyan's version; this fork prints the same table
 | ChatGPT Access | `Yes` / `No` | `api.openai.com` answers `403 unsupported_country_region_territory` where ChatGPT is not offered |
 | Claude Access | `Yes` / `No` | without a key the Anthropic API answers `401` in supported regions and `403 Request not allowed` elsewhere |
 | Netflix Catalog | `Full` / `Originals only` | two licensed titles are opened; if both are missing while a control title opens, Netflix shows only its own titles (region or proxy detection) |
-| Disney+ | country / `No` | Disney+ device registration reports whether the location is supported and which country it sees |
+| Disney+ | country / `No` | Disney+ device registration reports whether the location is supported and which country it sees; `No` also when Disney refuses this IP with "Forbidden location" (seen for hosting IPs even in countries where Disney+ works) |
 
 Gemini is not checked: Google returns the same page in supported and unsupported countries, so there is no reliable signal.
 
