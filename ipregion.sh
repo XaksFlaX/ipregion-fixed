@@ -1042,6 +1042,9 @@ make_request() {
     curl_args+=(--request "$method")
   fi
 
+  # --with-status: print the body and the HTTP code on the last line, 403/429 included
+  local with_status=false
+
   while (($#)); do
     case "$1" in
       --ip-version)
@@ -1050,6 +1053,10 @@ make_request() {
         ;;
       --follow)
         curl_args+=(--location)
+        shift
+        ;;
+      --with-status)
+        with_status=true
         shift
         ;;
       --user-agent)
@@ -1111,6 +1118,11 @@ make_request() {
 
   if [[ $exit_status -eq 124 ]]; then
     echo ""
+    return 0
+  fi
+
+  if [[ "$with_status" == true ]]; then
+    echo "$response_with_code"
     return 0
   fi
 
@@ -1592,7 +1604,7 @@ print_legend() {
     def clean:
       tostring
       | gsub("\u001b\\[[0-9;]*m"; "")
-      | select(test("^(No|Yes|N/A|null)$") | not);
+      | select(test("^(No|Yes|Blocked|N/A|null)$") | not);
 
     def counts(stream):
       [stream | select(. != null) | clean] as $arr
@@ -1896,17 +1908,37 @@ lookup_reddit() {
     --ip-version "$ip_version" \
     --user-agent "$user_agent" \
     --header "Authorization: $basic_access_token" \
-    --json '{"scopes":["email"]}')
+    --json '{"scopes":["email"]}' \
+    --with-status)
 
-  access_token=$(process_json "$response" ".access_token")
+  if is_reddit_block_page "$response"; then
+    print_value_or_colored "Blocked" "HEART"
+    return
+  fi
+
+  access_token=$(process_json "$(sed '$d' <<<"$response")" ".access_token")
 
   response=$(make_request POST "https://gql-fed.reddit.com" \
     --ip-version "$ip_version" \
     --user-agent "$user_agent" \
     --header "Authorization: Bearer $access_token" \
-    --json '{"operationName":"UserLocation","variables":{},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"f07de258c54537e24d7856080f662c1b1268210251e5789c8c08f20d76cc8ab2"}}}')
+    --json '{"operationName":"UserLocation","variables":{},"extensions":{"persistedQuery":{"version":1,"sha256Hash":"f07de258c54537e24d7856080f662c1b1268210251e5789c8c08f20d76cc8ab2"}}}' \
+    --with-status)
 
-  process_json "$response" ".data.userLocation.countryCode"
+  if is_reddit_block_page "$response"; then
+    print_value_or_colored "Blocked" "HEART"
+    return
+  fi
+
+  process_json "$(sed '$d' <<<"$response")" ".data.userLocation.countryCode"
+}
+
+# Reddit answers datacenter IPs with HTTP 403 and an HTML page "blocked by network security".
+# Takes make_request --with-status output (HTTP code on the last line)
+is_reddit_block_page() {
+  local response="$1"
+
+  [[ "$(tail -n1 <<<"$response")" == "403" ]] && grep -qi "blocked by network security" <<<"$response"
 }
 
 lookup_reddit_guest_access() {

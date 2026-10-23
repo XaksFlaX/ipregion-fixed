@@ -22,7 +22,8 @@ Compared to [Davoyan/ipregion@a85abbf](https://github.com/Davoyan/ipregion/blob/
 - **ipapi.co is excluded:** it answers `429 RateLimited` to datacenter IPs.
 - The temporary file is removed in `-j`/`-v` mode too.
 
-Not fixed: the Reddit check is empty from datacenter IPs (Reddit answers with a block page).
+- **Reddit shows `Blocked` instead of `N/A`** when Reddit answers with its block page
+  (HTTP 403 "blocked by network security", typical for datacenter IPs). From residential IPs it shows the country.
 
 ## Usage
 Run directly from GitHub:
