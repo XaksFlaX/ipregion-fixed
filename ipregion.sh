@@ -4,7 +4,7 @@
 shopt -s extglob
 
 # YYYY.MM.DD.N, N = change of the day. Bump on every change of this file (CI checks it)
-SCRIPT_VERSION="2026.10.23.4"
+SCRIPT_VERSION="2026.10.23.5"
 SCRIPT_URL="https://github.com/XaksFlaX/ipregion-fixed"
 DEPENDENCIES=("jq" "curl" "util-linux")
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
@@ -2594,6 +2594,12 @@ lookup_proxycheck() {
 # redirects to a random subdomain and reports which resolver asked for it. DoH is bypassed here
 lookup_dns_resolver() {
   local response geo country org code
+
+  # One resolver serves both IP versions, and edns.ip-api.com has no IPv6: check it once
+  if [[ "$1" == "6" && -n "$EXTERNAL_IPV4" && "$IPV6_ONLY" != true ]]; then
+    print_value_or_colored "same as IPv4" "NULL"
+    return
+  fi
 
   response=$(make_request GET "https://edns.ip-api.com/json" --follow --system-dns --ip-version "$1")
   is_valid_json "$response" || return
