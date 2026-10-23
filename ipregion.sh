@@ -1567,9 +1567,11 @@ add_result() {
   esac
 }
 
+# Prints one group of the table. The first group gets the "Service IPv4 IPv6" header,
+# the next ones are separated from it by an empty line
 print_table_group() {
     local group="$1"
-    local group_title="$2"
+    local show_header="${2:-true}"
     local na="N/A"
     local show_ipv4=0
     local show_ipv6=0
@@ -1578,13 +1580,9 @@ print_table_group() {
 
     [[ "$IPV6_ONLY" != true && -n "$EXTERNAL_IPV4" ]] && show_ipv4=1
     [[ "$IPV4_ONLY" != true && -n "$EXTERNAL_IPV6" ]] && show_ipv6=1
-	
-	if [[ "$group_title" != "GeoIP services" ]]; then
-		#printf "%s\n\n" "$(color HEADER "$group_title")"
-		printf "%-${col_width}s" "$(color TABLE_HEADER 'Service')"
-	fi
 
-    if [[ "$group_title" != "GeoIP services" ]]; then
+    if [[ "$show_header" == true ]]; then
+        printf "%-${col_width}s" "$(color TABLE_HEADER 'Service')"
         [[ $show_ipv4 -eq 1 ]] && printf "%s%s" "$separator" "$(color TABLE_HEADER 'IPv4')"
         [[ $show_ipv6 -eq 1 ]] && printf "%s%s" "$separator" "$(color TABLE_HEADER 'IPv6')"
     fi
@@ -1600,15 +1598,15 @@ print_table_group() {
 
         printf "%-${col_width}s" "$(color SERVICE "$s")"
 
-		if [[ $show_ipv4 -eq 1 ]]; then
-			[[ "$v4" == "null" || -z "$v4" ]] && v4="$na"
-			printf "%s%s" "$separator" "$(format_value "$v4" "$na")"
-		fi
+        if [[ $show_ipv4 -eq 1 ]]; then
+            [[ "$v4" == "null" || -z "$v4" ]] && v4="$na"
+            printf "%s%s" "$separator" "$(format_value "$v4" "$na")"
+        fi
 
-		if [[ $show_ipv6 -eq 1 ]]; then
-			[[ "$v6" == "null" || -z "$v6" ]] && v6="$na"
-			printf "%s%s" "$separator" "$(format_value "$v6" "$na")"
-		fi
+        if [[ $show_ipv6 -eq 1 ]]; then
+            [[ "$v6" == "null" || -z "$v6" ]] && v6="$na"
+            printf "%s%s" "$separator" "$(format_value "$v6" "$na")"
+        fi
 
         printf "\n"
     done
@@ -1749,25 +1747,17 @@ print_results() {
   print_header
 
   case "$GROUPS_TO_SHOW" in
-    primary)
-      print_table_group "primary" "GeoIP services"
-      ;;
-    custom)
-      print_table_group "custom" "Popular services"
-      ;;
-    cdn)
-      print_table_group "cdn" "CDN services"
+    primary | custom | cdn)
+      print_table_group "$GROUPS_TO_SHOW"
       ;;
     *)
-      print_table_group "custom" "Popular services"
-      print_table_group "primary" "GeoIP services"
-	  print_legend
-	  #printf "\n\n-----CDN-----\n"
-      #print_table_group "cdn" "CDN services"
+      print_table_group "custom"
+      print_table_group "primary" false
+      # CDN rows show where the nearest video node is, not where the IP is: not in the legend
+      print_table_group "cdn" false
+      print_legend
       ;;
   esac
-  
-
 }
 
 lookup_cloudflare() {

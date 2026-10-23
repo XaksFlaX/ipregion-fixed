@@ -52,6 +52,12 @@ with exactly the same results.
 
 The version is printed in the header and in JSON (`script_version`).
 
+### CDN rows are back in the table
+
+`YouTube CDN` and `Netflix CDN` were checked on every run but hidden. Now they are printed after the GeoIP services.
+They show the country of the video node that serves this IP (useful to see how far the server is from it),
+so they are not counted in the legend.
+
 ## What is fixed
 
 Compared to [Davoyan/ipregion@a85abbf](https://github.com/Davoyan/ipregion/blob/a85abbf739e07b1162bee066d756be1e4b9bfcc0/ipregion.sh):
