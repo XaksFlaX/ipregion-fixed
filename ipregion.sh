@@ -4,7 +4,7 @@
 shopt -s extglob
 
 # YYYY.MM.DD.N, N = change of the day. Bump on every change of this file (CI checks it)
-SCRIPT_VERSION="2026.10.23.1"
+SCRIPT_VERSION="2026.10.23.2"
 SCRIPT_URL="https://github.com/XaksFlaX/ipregion-fixed"
 DEPENDENCIES=("jq" "curl" "util-linux")
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
@@ -26,6 +26,10 @@ GROUPS_TO_SHOW="all"
 CURL_TIMEOUT=6
 CURL_RETRIES=1
 PARALLEL_JOBS=6
+UPDATE_CHECK=true
+UPDATE_CHECK_URL="https://raw.githubusercontent.com/XaksFlaX/ipregion-fixed/main/ipregion.sh"
+UPDATE_CHECK_PID=""
+LATEST_VERSION=""
 IPV4_ONLY=false
 IPV6_ONLY=false
 PROXY_ADDR=""
@@ -566,6 +570,7 @@ Options:
   -p, --proxy ADDR     Use SOCKS5 proxy (format: host:port)
   -i, --interface IF   Use specified network interface (e.g. eth1)
   -P, --parallel N     Check N services at a time (default: $PARALLEL_JOBS, 1 = one by one)
+      --no-update-check  Do not check GitHub for a newer version of this script
 
 Examples:
   $0                       # Check all services with default settings
@@ -856,6 +861,10 @@ parse_arguments() {
           error_exit "Invalid parallel value: $2. It must be a positive integer"
         fi
         shift 2
+        ;;
+      --no-update-check)
+        UPDATE_CHECK=false
+        shift
         ;;
       *)
         error_exit "Unknown option: $1"
@@ -1517,7 +1526,8 @@ finalize_json() {
       --arg ipv4 "$EXTERNAL_IPV4" \
       --arg ipv6 "$EXTERNAL_IPV6" \
       --arg version "1" \
-      --arg script_version "$SCRIPT_VERSION" '
+      --arg script_version "$SCRIPT_VERSION" \
+      --arg latest_version "${LATEST_VERSION:-}" '
         def lines_to_array($raw):
           if ($raw | length) == 0 then [] else
           ($raw | split("\n"))
@@ -1535,6 +1545,7 @@ finalize_json() {
         {
           version: ($version|tonumber),
           script_version: $script_version,
+          latest_version: ($latest_version | select(length > 0) // null),
           ipv4: ($ipv4 | select(length > 0) // null),
           ipv6: ($ipv6 | select(length > 0) // null),
           results: {
@@ -1752,7 +1763,67 @@ print_legend() {
   } | column -t -s "$separator"
 }
 
+# Runs in the background while the services are checked: reads SCRIPT_VERSION from the
+# first 2 KB of the script on GitHub. Failures are silent, the result goes to a file
+start_update_check() {
+  if [[ "$UPDATE_CHECK" != true ]]; then
+    return
+  fi
+
+  (
+    make_request GET "$UPDATE_CHECK_URL" --header "Range: bytes=0-2047" \
+      | grep -m 1 -oP '^SCRIPT_VERSION="\K[0-9.]+(?=")' >"$WORK_DIR/latest_version"
+  ) &
+  UPDATE_CHECK_PID=$!
+}
+
+# Prints the version found by start_update_check, or nothing
+get_latest_version() {
+  local latest
+
+  if [[ -z "$UPDATE_CHECK_PID" ]]; then
+    return
+  fi
+
+  wait "$UPDATE_CHECK_PID" 2>/dev/null
+  latest=$(cat "$WORK_DIR/latest_version" 2>/dev/null)
+
+  if [[ "$latest" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+    echo "$latest"
+  fi
+}
+
+# True when version $1 is newer than version $2 (numeric, dot by dot: 2026.10.23.10 > 2026.10.23.9)
+version_newer() {
+  local a b i
+  IFS=. read -ra a <<<"$1"
+  IFS=. read -ra b <<<"$2"
+
+  for ((i = 0; i < ${#a[@]} || i < ${#b[@]}; i++)); do
+    if ((10#${a[i]:-0} > 10#${b[i]:-0})); then
+      return 0
+    fi
+    if ((10#${a[i]:-0} < 10#${b[i]:-0})); then
+      return 1
+    fi
+  done
+
+  return 1
+}
+
+print_update_notice() {
+  local latest="$1"
+
+  if [[ -z "$latest" ]] || ! version_newer "$latest" "$SCRIPT_VERSION"; then
+    return
+  fi
+
+  printf "\n%s\n" "$(color WARN "A newer version is available: $latest (this one is $SCRIPT_VERSION). Run the latest:")"
+  printf "%s\n" "$(color URL "bash <(curl -fsSL $UPDATE_CHECK_URL)")"
+}
+
 print_results() {
+  LATEST_VERSION=$(get_latest_version)
   finalize_json
 
   if [[ "$JSON_OUTPUT" == true ]]; then
@@ -1774,6 +1845,8 @@ print_results() {
       print_legend
       ;;
   esac
+
+  print_update_notice "$LATEST_VERSION"
 }
 
 lookup_cloudflare() {
@@ -2389,6 +2462,7 @@ main() {
 
   get_external_ip
   get_asn
+  start_update_check
 
   if [[ "$JSON_OUTPUT" != true && "$VERBOSE" != true ]]; then
     trap 'spinner_stop; exit' INT TERM

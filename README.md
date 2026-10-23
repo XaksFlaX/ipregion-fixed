@@ -181,6 +181,7 @@ Options:
   -p, --proxy ADDR     Use SOCKS5 proxy (format: host:port)
   -i, --interface IF   Use specified network interface (e.g. eth1)
   -P, --parallel N     Check N services at a time (default: 6, 1 = one by one)
+      --no-update-check  Do not check GitHub for a newer version of this script
 
 Examples:
   ipregion.sh                       # Check all services with default settings
@@ -203,6 +204,10 @@ The first line of the output shows the version, e.g. `ipregion-fixed 2026.10.23.
 
 GitHub caches files under `raw.githubusercontent.com/.../main/...` for up to 5 minutes, so right after an update
 the `main` link may still serve the previous version. A link to a specific commit is never stale.
+
+While the services are checked, the script reads the latest version from GitHub (the first 2 KB of `ipregion.sh` on `main`).
+If it is newer, the output ends with "A newer version is available" and the command to run it; JSON gets `latest_version`.
+If GitHub is unreachable nothing is printed. `--no-update-check` turns this off.
 
 ## License
 
