@@ -19,9 +19,23 @@ less ipregion.sh
 bash ipregion.sh
 ```
 
-Output example (screenshot of Davoyan's version; this fork prints the same table with a few more rows):
+### Output example
 
-![image](https://i.imgur.com/Bn1o644.png)
+A VPS in Moldova, version 2026.10.23.2 (IP addresses and ASN are hidden):
+
+![Example output of ipregion-fixed](docs/example-output.png)
+
+How to read it:
+
+- **Columns** — the same check over IPv4 and IPv6. `N/A` in the IPv6 column usually means the service has no IPv6.
+- **Country codes** — where the service thinks the IP is. Here services disagree: about half see Moldova (`MD`), half Romania (`RO`).
+- **YouTube Premium / Music `No`** — Google sees Moldova, where they are not offered.
+- **ChatGPT / Claude Access `Yes`** — both work from this IP.
+- **Netflix Catalog `Originals only`** — Netflix shows only its own titles here.
+- **Disney+ `No`** — Disney refuses this IP ("Forbidden location").
+- **Reddit `Blocked`** — Reddit blocks this IP (typical for hosting); Guest Access `No`: even the site does not open.
+- **The second block** — GeoIP databases; **YouTube/Netflix CDN** — the country of the node that serves video.
+- **Legend** — share of services that see each country, counted over country codes only.
 
 ## What is new in this fork
 
