@@ -62,7 +62,8 @@ How to read it:
 Disney+ and Gemini come from the [original script](https://github.com/vernette/ipregion/) (both were dropped in Davoyan's fork):
 Disney+ uses the same request, Gemini the same idea (Google's region list, names compared word by word) without the extra
 downloads of CLDR names. Also from the original: two more GeoIP databases (ip2location.io, ifconfig.co),
-`Cloudflare CDN` (the Cloudflare data center that serves the IP, e.g. `DE (FRA)`) and `Microsoft (account)`
+`Cloudflare CDN` (the Cloudflare data center that serves the IP, e.g. `DE (FRA)`; when `speed.cloudflare.com/meta` has no
+data center for the address, the airport code comes from `/cdn-cgi/trace`) and `Microsoft (account)`
 (the country login.live.com sees; the Bing row uses it only as a fallback). Perplexity is not checked: its API answers the same from Russia and from the Netherlands,
 and its site is behind bot protection, so there is no regional signal.
 
@@ -70,7 +71,8 @@ and its site is behind bot protection, so there is no regional signal.
 
 Services that close themselves to Russia (from the geoblock list of [vernette/censorcheck](https://github.com/vernette/censorcheck)):
 Patreon, Snyk, Swagger, Graylog, Redis, Notion and Dell. Each was checked from Russia, the Netherlands and Germany and kept only
-if Russia gets HTTP 403 while the others do not. `Yes` = the site opens, `Blocked` = 403 for this IP. A server abroad can get
+if Russia gets HTTP 403 while the others do not. `Yes` = the site opens, `Blocked` = 403 for this IP, `Captcha` = Cloudflare's
+bot check ("Just a moment...") instead of an answer; a 403 is asked once more before it counts. A server abroad can get
 `Blocked` too when some databases place its IP in Russia: on our Aeza server in the Netherlands Patreon answers 403.
 
 ### IP reputation and DNS

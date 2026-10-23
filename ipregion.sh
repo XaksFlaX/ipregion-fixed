@@ -4,7 +4,7 @@
 shopt -s extglob
 
 # YYYY.MM.DD.N, N = change of the day. Bump on every change of this file (CI checks it)
-SCRIPT_VERSION="2026.10.23.13"
+SCRIPT_VERSION="2026.10.23.14"
 SCRIPT_URL="https://github.com/XaksFlaX/ipregion-fixed"
 DEPENDENCIES=("jq" "curl" "util-linux")
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
@@ -2574,17 +2574,31 @@ lookup_grok_access() {
 
 # Services that close themselves to Russia (from the geoblock list of vernette/censorcheck, kept
 # where Russia gets a 403 and the Netherlands and Germany do not). 2xx/3xx = open, 403 = blocked
-# for this IP: an IP that some databases place in Russia may get it too
+# for this IP: an IP that some databases place in Russia may get it too. Cloudflare's bot check
+# also answers 403 now and then, so a 403 is asked once more, and its "Just a moment..."
+# challenge page is shown as Captcha, not as a block
 check_ru_restricted() {
   local url="$1"
   local ip_version="$2"
-  local response
+  local response attempt
 
-  response=$(make_request GET "$url" --ip-version "$ip_version" --user-agent "$USER_AGENT" --with-status)
+  for attempt in 1 2; do
+    response=$(make_request GET "$url" --ip-version "$ip_version" --user-agent "$USER_AGENT" --with-status)
+    [[ "$(tail -n1 <<<"$response")" == "403" && $attempt -eq 1 ]] || break
+    sleep 1
+  done
 
   case "$(tail -n1 <<<"$response")" in
-    2?? | 3??) print_value_or_colored "Yes" "SERVICE" ;;
-    403) print_value_or_colored "Blocked" "HEART" ;;
+    2?? | 3??)
+      print_value_or_colored "Yes" "SERVICE"
+      ;;
+    403)
+      if grep -qiE "<title>Just a moment|challenge-platform" <<<"$response"; then
+        print_value_or_colored "Captcha" "WARN"
+      else
+        print_value_or_colored "Blocked" "HEART"
+      fi
+      ;;
   esac
 }
 
@@ -2774,26 +2788,35 @@ lookup_tiktok() {
   process_json "$response" ".body.appProps.region"
 }
 
-# Cloudflare CDN (from vernette/ipregion): the Cloudflare data center that serves this IP.
-# speed.cloudflare.com/meta gives its airport code and country, e.g. "DE (FRA)"
+# Cloudflare CDN (from vernette/ipregion): the Cloudflare data center that serves this IP, e.g.
+# "DE (FRA)". speed.cloudflare.com/meta usually has it in "colo" but not for every address; then the
+# airport code comes from /cdn-cgi/trace ("colo=FRA") and its country from get_iata_location
 lookup_cloudflare_cdn() {
   local ip_version="$1"
   local response iata country
 
-  response=$(make_request GET "https://speed.cloudflare.com/meta"     --ip-version "$ip_version" --header "Referer: https://speed.cloudflare.com")
-  is_valid_json "$response" || return
+  response=$(make_request GET "https://speed.cloudflare.com/meta" \
+    --ip-version "$ip_version" --header "Referer: https://speed.cloudflare.com")
 
-  iata=$(process_json "$response" '.colo.iata // empty')
-  country=$(process_json "$response" '.colo.cca2 // empty')
+  if is_valid_json "$response"; then
+    iata=$(process_json "$response" '.colo.iata // empty')
+    country=$(process_json "$response" '.colo.cca2 // empty')
+  fi
+
+  if [[ -z "$iata" ]]; then
+    response=$(make_request GET "https://speed.cloudflare.com/cdn-cgi/trace" --ip-version "$ip_version")
+    iata=$(sed -n 's/^colo=\([A-Z]\{3\}\)$/\1/p' <<<"$response" | head -n 1)
+  fi
 
   if [[ -z "$country" && -n "$iata" ]]; then
     country=$(get_iata_location "$iata")
+    [[ "$country" == "null" ]] && country=""
   fi
 
   if [[ -n "$country" && -n "$iata" ]]; then
     echo "$country ($iata)"
   else
-    echo "$country"
+    echo "${country:-$iata}"
   fi
 }
 
