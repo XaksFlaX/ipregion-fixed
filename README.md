@@ -28,7 +28,8 @@ A VPS in Moldova, version 2026.10.23.9 (IP addresses, ASN and host name are hidd
 
 How to read it:
 
-- **Blocks** — Google and YouTube, AI assistants, Video, Music, Social, Other, then GeoIP databases, CDN and IP reputation.
+- **Blocks** — Google and YouTube, AI assistants, Video, Music, Social, (since 2026.10.23.13) Closed to Russia, Other,
+  then GeoIP databases, CDN and IP reputation.
 - **Columns** — the same check over IPv4 and IPv6. `N/A` in the IPv6 column usually means the service has no IPv6.
 - **Country codes** — where the service thinks the IP is. Here services disagree: about half see Moldova (`MD`), half Romania (`RO`).
 - **YouTube Premium / Music `No`** — Google sees Moldova, where they are not offered.
@@ -65,6 +66,13 @@ downloads of CLDR names. Also from the original: two more GeoIP databases (ip2lo
 (the country login.live.com sees; the Bing row uses it only as a fallback). Perplexity is not checked: its API answers the same from Russia and from the Netherlands,
 and its site is behind bot protection, so there is no regional signal.
 
+### Closed to Russia
+
+Services that close themselves to Russia (from the geoblock list of [vernette/censorcheck](https://github.com/vernette/censorcheck)):
+Patreon, Snyk, Swagger, Graylog, Redis, Notion and Dell. Each was checked from Russia, the Netherlands and Germany and kept only
+if Russia gets HTTP 403 while the others do not. `Yes` = the site opens, `Blocked` = 403 for this IP. A server abroad can get
+`Blocked` too when some databases place its IP in Russia: on our Aeza server in the Netherlands Patreon answers 403.
+
 ### IP reputation and DNS
 
 Most refusals (Reddit, Disney+, Netflix showing only its own titles) are not about the country but about the IP being
@@ -75,6 +83,7 @@ a hosting or VPN address. A block after the CDN rows shows how the IP is seen:
 | Network (ipinfo) | `Hosting` / `ISP` / `Business` / `Education`, then `VPN`, `Proxy`, `Tor`, `Relay` if flagged, e.g. `Hosting, VPN` | ipinfo.io: the same free widget answer as the ipinfo.io row, requested once per IP version and over that version (`v6.ipinfo.io` for IPv6): ipinfo answers freely only about the address a request comes from, lookups of other addresses have a small daily quota |
 | Hosting (ip-api) | `Yes` / `No` | ip-api.com |
 | VPN/Proxy (proxycheck) | `No` / `VPN` / `Proxy` / … | proxycheck.io (free: 100 queries a day per IP) |
+| Risk (Scamalytics) | `0, Low` … `100, Very High` | the fraud score from Scamalytics' public page (no key, no relay); many services use such scores to decide on a captcha. In the summary only a risk above Low counts as a flag |
 | DNS resolver | country and provider, e.g. `DE Google` | edns.ip-api.com: which resolver looked up a random name. The script's own DoH is bypassed here, so this is the system resolver (or the proxy's one with `-p`). Checked once: the IPv6 column says `same as IPv4` (edns.ip-api.com has no IPv6, so with `-6` it is `N/A`) |
 
 ### Summary
@@ -271,7 +280,7 @@ User-Agent). Nothing else is sent: no host name, files or settings, no results, 
 Who sees the IP during a run:
 
 - the services being checked (Google, Netflix, ChatGPT, Reddit…) — that is the point of the check;
-- GeoIP and reputation databases (MaxMind, ipinfo, ip-api, proxycheck…) — they get the address in the request;
+- GeoIP and reputation databases (MaxMind, ipinfo, ip-api, proxycheck, Scamalytics…) — they get the address in the request;
 - helpers: ident.me, ifconfig.me, ipify and icanhazip (external IP), edns.ip-api.com (DNS resolver),
   GitHub (update check, `--no-update-check` turns it off);
 - the DNS-over-HTTPS resolver: names are resolved via Cloudflare `1.1.1.1` (Quad9, OpenDNS or AdGuard if it is

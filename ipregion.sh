@@ -4,7 +4,7 @@
 shopt -s extglob
 
 # YYYY.MM.DD.N, N = change of the day. Bump on every change of this file (CI checks it)
-SCRIPT_VERSION="2026.10.23.12"
+SCRIPT_VERSION="2026.10.23.13"
 SCRIPT_URL="https://github.com/XaksFlaX/ipregion-fixed"
 DEPENDENCIES=("jq" "curl" "util-linux")
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
@@ -427,6 +427,13 @@ declare -A CUSTOM_SERVICES=(
   [JETBRAINS]="JetBrains"
   [BING]="Microsoft (Bing)"
   [MICROSOFT]="Microsoft (account)"
+  [PATREON]="Patreon"
+  [SNYK]="Snyk"
+  [SWAGGER]="Swagger"
+  [GRAYLOG]="Graylog"
+  [REDIS_IO]="Redis"
+  [NOTION]="Notion"
+  [DELL]="Dell"
 )
 
 # Popular services in blocks: "Title|SERVICE SERVICE ...". The order of checks and of the table
@@ -437,6 +444,7 @@ CUSTOM_SECTIONS=(
   "Video|NETFLIX NETFLIX_CATALOG DISNEY_PLUS AMAZON_PRIME TWITCH TIKTOK"
   "Music|SPOTIFY SPOTIFY_SIGNUP DEEZER"
   "Social|REDDIT REDDIT_GUEST_ACCESS"
+  "Closed to Russia|PATREON SNYK SWAGGER GRAYLOG REDIS_IO NOTION DELL"
   "Other|APPLE STEAM PLAYSTATION OOKLA_SPEEDTEST JETBRAINS BING MICROSOFT"
 )
 
@@ -482,6 +490,14 @@ declare -A CUSTOM_SERVICES_HANDLERS=(
   [JETBRAINS]="lookup_jetbrains"
   [BING]="lookup_bing"
   [MICROSOFT]="lookup_microsoft"
+  [PATREON]="lookup_patreon"
+  [SNYK]="lookup_snyk"
+  [SWAGGER]="lookup_swagger"
+  [GRAYLOG]="lookup_graylog"
+  [REDIS_IO]="lookup_redis_io"
+  [NOTION]="lookup_notion"
+  [DELL]="lookup_dell"
+  [SCAMALYTICS]="lookup_scamalytics"
   [CLOUDFLARE_CDN]="lookup_cloudflare_cdn"
   [IPINFO_NETWORK]="lookup_ipinfo_network"
   [IPAPI_HOSTING]="lookup_ipapi_hosting"
@@ -506,6 +522,7 @@ declare -A NETWORK_SERVICES=(
   [IPINFO_NETWORK]="Network (ipinfo)"
   [IPAPI_HOSTING]="Hosting (ip-api)"
   [PROXYCHECK]="VPN/Proxy (proxycheck)"
+  [SCAMALYTICS]="Risk (Scamalytics)"
   [DNS_RESOLVER]="DNS resolver"
 )
 
@@ -513,6 +530,7 @@ NETWORK_SERVICES_ORDER=(
   "IPINFO_NETWORK"
   "IPAPI_HOSTING"
   "PROXYCHECK"
+  "SCAMALYTICS"
   "DNS_RESOLVER"
 )
 
@@ -1962,7 +1980,9 @@ SUMMARY_FILTER='
     "Google Search Captcha": "Google Search", "YouTube Premium": "YouTube Premium",
     "YouTube Music": "YouTube Music", "ChatGPT Access": "ChatGPT", "Claude Access": "Claude",
     "Gemini Access": "Gemini", "Copilot Access": "Copilot", "Grok Access": "Grok", "Netflix Catalog": "Netflix",
-    "Disney+": "Disney+", "Spotify Signup": "Spotify", "Reddit": "Reddit", "Amazon Prime": "Prime Video"
+    "Disney+": "Disney+", "Spotify Signup": "Spotify", "Reddit": "Reddit", "Amazon Prime": "Prime Video",
+    "Patreon": "Patreon", "Snyk": "Snyk", "Swagger": "Swagger", "Graylog": "Graylog", "Redis": "Redis",
+    "Notion": "Notion", "Dell": "Dell"
   };
   def kind:
     if .service == "Google Search Captcha" then
@@ -1980,6 +2000,7 @@ SUMMARY_FILTER='
   | ([ (.results.network // [])[] | select(.service != "DNS resolver")
        | {service, value: ((.[$v] // "") | plain)}
        | select(.value | IN("", "N/A", "null", "Timeout", "RateLimited") | not)
+       | select(.value | test(", Low$") | not)
        | (.service | capture("\\((?<s>[^)]*)\\)").s // "") as $source
        | (if .value == "Yes" then [.service | sub(" \\(.*"; "")] else (.value | split(", ")) end)
        | map(select(IN("No", "ISP", "Business", "Education") | not))
@@ -2551,6 +2572,30 @@ lookup_grok_access() {
   fi
 }
 
+# Services that close themselves to Russia (from the geoblock list of vernette/censorcheck, kept
+# where Russia gets a 403 and the Netherlands and Germany do not). 2xx/3xx = open, 403 = blocked
+# for this IP: an IP that some databases place in Russia may get it too
+check_ru_restricted() {
+  local url="$1"
+  local ip_version="$2"
+  local response
+
+  response=$(make_request GET "$url" --ip-version "$ip_version" --user-agent "$USER_AGENT" --with-status)
+
+  case "$(tail -n1 <<<"$response")" in
+    2?? | 3??) print_value_or_colored "Yes" "SERVICE" ;;
+    403) print_value_or_colored "Blocked" "HEART" ;;
+  esac
+}
+
+lookup_patreon() { check_ru_restricted "https://www.patreon.com/" "$1"; }
+lookup_snyk() { check_ru_restricted "https://snyk.io/" "$1"; }
+lookup_swagger() { check_ru_restricted "https://swagger.io/" "$1"; }
+lookup_graylog() { check_ru_restricted "https://graylog.org/" "$1"; }
+lookup_redis_io() { check_ru_restricted "https://redis.io/" "$1"; }
+lookup_notion() { check_ru_restricted "https://www.notion.so/" "$1"; }
+lookup_dell() { check_ru_restricted "https://www.dell.com/" "$1"; }
+
 # Address checked in the "network" rows and the transport for the request: these services
 # take the address in the URL, so IPv4 transport works for an IPv6 address too
 external_ip_for() {
@@ -2655,6 +2700,28 @@ lookup_proxycheck() {
     yes) print_value_or_colored "$(jq -r --arg ip "$ip" '.[$ip].type // "Proxy"' <<<"$response")" "HEART" ;;
     no) print_value_or_colored "No" "SERVICE" ;;
   esac
+}
+
+# Scamalytics fraud score of the address, read from its public page (no key, no relay):
+# "0, Low" ... "100, Very High". Many services use such scores to decide on a captcha
+lookup_scamalytics() {
+  local response score risk color_name
+
+  response=$(make_request GET "https://scamalytics.com/ip/$(external_ip_for "$1")"     --ip-version "$(network_transport)" --user-agent "$USER_AGENT")
+  score=$(grep -oP 'Fraud Score: ?\K[0-9]+' <<<"$response" | head -n 1)
+  risk=$(grep -oiP '\b(very high|high|medium|low)(?= risk)' <<<"$response" | head -n 1)
+
+  if [[ -z "$score" ]]; then
+    return
+  fi
+
+  case "${risk,,}" in
+    low) color_name="SERVICE" ;;
+    medium) color_name="WARN" ;;
+    *) color_name="HEART" ;;
+  esac
+
+  print_value_or_colored "$score, ${risk:-?}" "$color_name"
 }
 
 # The resolver that looks up names for this host (or for the proxy, with -p): edns.ip-api.com
