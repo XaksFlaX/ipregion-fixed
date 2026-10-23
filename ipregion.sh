@@ -4,7 +4,7 @@
 shopt -s extglob
 
 # YYYY.MM.DD.N, N = change of the day. Bump on every change of this file (CI checks it)
-SCRIPT_VERSION="2026.10.23.2"
+SCRIPT_VERSION="2026.10.23.3"
 SCRIPT_URL="https://github.com/XaksFlaX/ipregion-fixed"
 DEPENDENCIES=("jq" "curl" "util-linux")
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
@@ -555,7 +555,7 @@ error_exit() {
 display_help() {
   cat <<EOF
 
-Usage: $0 [OPTIONS]
+Usage: ipregion.sh [OPTIONS]
 
 IPRegion — determines your IP geolocation using various GeoIP services and popular websites
 
@@ -573,17 +573,17 @@ Options:
       --no-update-check  Do not check GitHub for a newer version of this script
 
 Examples:
-  $0                       # Check all services with default settings
-  $0 -g primary            # Check only GeoIP services
-  $0 -g custom             # Check only popular websites
-  $0 -g cdn                # Check only CDN endpoints
-  $0 -4                    # Test only IPv4
-  $0 -6                    # Test only IPv6
-  $0 -p 127.0.0.1:1080     # Use SOCKS5 proxy
-  $0 -i eth1               # Use network interface eth1
-  $0 -j                    # Output result as JSON
-  $0 -v                    # Enable verbose logging
-  $0 -P 1                  # Check services one by one
+  ipregion.sh                     # Check all services with default settings
+  ipregion.sh -g primary          # Check only GeoIP services
+  ipregion.sh -g custom           # Check only popular websites
+  ipregion.sh -g cdn              # Check only CDN endpoints
+  ipregion.sh -4                  # Test only IPv4
+  ipregion.sh -6                  # Test only IPv6
+  ipregion.sh -p 127.0.0.1:1080   # Use SOCKS5 proxy
+  ipregion.sh -i eth1             # Use network interface eth1
+  ipregion.sh -j                  # Output result as JSON
+  ipregion.sh -v                  # Enable verbose logging
+  ipregion.sh -P 1                # Check services one by one
 
 EOF
 }

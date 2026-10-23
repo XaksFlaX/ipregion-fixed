@@ -6,8 +6,8 @@ Bash-скрипт, который показывает, в какой стран
 Удобно для проверки VPN и VPS: сразу видно, откроются ли YouTube Premium, ChatGPT, Claude, Netflix и другие.
 
 Это форк [Davoyan/ipregion](https://github.com/Davoyan/ipregion), который, в свою очередь, форк [оригинального скрипта](https://github.com/vernette/ipregion/).
-Здесь исправлены утечки мимо прокси и установка пакетов без спроса, добавлены проверки доступности ChatGPT, Claude, Netflix и Disney+,
-а проверки идут параллельно. Подробности ниже.
+Здесь исправлены утечки мимо прокси и установка пакетов без спроса, добавлены проверки доступности ChatGPT, Claude и Netflix,
+возвращена проверка Disney+ из оригинала, а проверки идут параллельно. Подробности ниже.
 
 ## Запуск
 
@@ -52,7 +52,9 @@ VPS в Молдове, версия 2026.10.23.2 (IP-адреса и ASN скр�
 | Netflix Catalog | `Full` / `Originals only` | открываются два лицензионных тайтла; если обоих нет, а контрольный открывается, Netflix показывает только свои сериалы (так бывает в некоторых странах и для IP, которые он считает прокси) |
 | Disney+ | страна / `No` | регистрация устройства Disney+ сообщает, поддерживается ли регион и какую страну видит сервис; `No` и тогда, когда Disney отказывает этому IP с ошибкой «Forbidden location» (так бывает с IP хостеров даже в странах, где Disney+ работает) |
 
-Gemini не проверяется: Google отдаёт одинаковую страницу и в поддерживаемых, и в неподдерживаемых странах, надёжного признака нет.
+Disney+ был в [оригинальном скрипте](https://github.com/vernette/ipregion/), в форке Davoyan его убрали; здесь он возвращён с тем же запросом.
+В оригинале есть и проверка Gemini — по опубликованному Google списку стран. Здесь строки Gemini нет: сама страница Gemini
+выглядит одинаково и там, где он доступен, и там, где нет, а список стран внутри скрипта пришлось бы отдельно обновлять.
 
 ### Причина вместо `N/A`
 
@@ -111,6 +113,8 @@ Gemini не проверяется: Google отдаёт одинаковую с�
 - **Понятный вывод:** названия стран вместо одних кодов и проценты по сервисам.
 - **Исправлены мелкие ошибки**, например скрипт нельзя было прервать во время работы.
 
+Список выше пересказывает README Davoyan. В этом форке строки CDN снова выводятся в общей таблице (см. выше).
+
 ## Возможности
 
 - Проверка местоположения IP по нескольким публичным GeoIP-базам
@@ -125,7 +129,7 @@ Gemini не проверяется: Google отдаёт одинаковую с�
 - bash
 - curl
 - jq
-- util-linux или bsdmainutils (для `column`)
+- `column`: из util-linux, а в Debian и Ubuntu — из bsdextrautils или bsdmainutils
 
 Если чего-то не хватает, скрипт покажет точную команду установки и спросит, выполнить ли её.
 
@@ -139,44 +143,47 @@ Gemini не проверяется: Google отдаёт одинаковую с�
 ### Примеры
 
 ```bash
+# Опции работают и при запуске прямо с GitHub
+bash <(curl -fsSL https://raw.githubusercontent.com/XaksFlaX/ipregion-fixed/main/ipregion.sh) --group primary
+
 # Справка
-./ipregion.sh --help
+bash ipregion.sh --help
 
 # Все проверки с настройками по умолчанию
-./ipregion.sh
+bash ipregion.sh
 
 # Только GeoIP-базы
-./ipregion.sh --group primary
+bash ipregion.sh --group primary
 
 # Только CDN
-./ipregion.sh --group cdn
+bash ipregion.sh --group cdn
 
 # Только популярные сервисы
-./ipregion.sh --group custom
+bash ipregion.sh --group custom
 
 # Только IPv4
-./ipregion.sh --ipv4
+bash ipregion.sh --ipv4
 
 # Только IPv6
-./ipregion.sh --ipv6
+bash ipregion.sh --ipv6
 
 # Через SOCKS5-прокси
-./ipregion.sh --proxy 127.0.0.1:1080
+bash ipregion.sh --proxy 127.0.0.1:1080
 
 # Через конкретный сетевой интерфейс
-./ipregion.sh --interface eth1
+bash ipregion.sh --interface eth1
 
 # Время ожидания ответа, секунд
-./ipregion.sh --timeout 20
+bash ipregion.sh --timeout 20
 
 # Проверять сервисы по одному, а не по 6 сразу
-./ipregion.sh --parallel 1
+bash ipregion.sh --parallel 1
 
 # Результат в JSON
-./ipregion.sh --json
+bash ipregion.sh --json
 
 # Подробный журнал
-./ipregion.sh --verbose
+bash ipregion.sh --verbose
 ```
 
 Все опции из справки (`-h, --help`) можно сочетать.

@@ -4,8 +4,8 @@
 
 A bash script for determining your IP geolocation using various GeoIP services and popular websites.  
 This is a fork of [Davoyan/ipregion](https://github.com/Davoyan/ipregion) (itself a fork of the [original script](https://github.com/vernette/ipregion/))
-that fixes proxy leaks and unattended package installs, adds availability checks for ChatGPT, Claude, Netflix and Disney+,
-and runs the checks in parallel. Details below.
+that fixes proxy leaks and unattended package installs, adds availability checks for ChatGPT, Claude and Netflix,
+brings back the Disney+ check of the original script and runs the checks in parallel. Details below.
 
 ## Usage
 Run directly from GitHub:
@@ -48,7 +48,10 @@ How to read it:
 | Netflix Catalog | `Full` / `Originals only` | two licensed titles are opened; if both are missing while a control title opens, Netflix shows only its own titles (region or proxy detection) |
 | Disney+ | country / `No` | Disney+ device registration reports whether the location is supported and which country it sees; `No` also when Disney refuses this IP with "Forbidden location" (seen for hosting IPs even in countries where Disney+ works) |
 
-Gemini is not checked: Google returns the same page in supported and unsupported countries, so there is no reliable signal.
+Disney+ was in the [original script](https://github.com/vernette/ipregion/) and was dropped in Davoyan's fork; this fork brings it back
+with the same request. The original also checks Gemini, against Google's published list of supported countries.
+This fork has no Gemini row: the Gemini page itself looks the same in supported and unsupported countries,
+and a country list kept in the script would need its own updates.
 
 ### A reason instead of `N/A`
 
@@ -109,6 +112,8 @@ Compared to the original script, [Davoyan/ipregion](https://github.com/Davoyan/i
 - **Country names + percentage stats**: alongside ISO codes, shows country names and percentage distribution across services
 - **Fixed minor bugs**, e.g., inability to interrupt the script during execution.
 
+The list above is quoted from Davoyan's README. In this fork the CDN rows are shown in the full table again (see above).
+
 ## Main features
 
 - Checks your IP geolocation using multiple public GeoIP APIs
@@ -123,7 +128,9 @@ Compared to the original script, [Davoyan/ipregion](https://github.com/Davoyan/i
 - bash
 - curl
 - jq
-- util-linux or bsdmainutils (for `column`)
+- `column`: util-linux, or bsdextrautils / bsdmainutils on Debian and Ubuntu
+
+If something is missing, the script shows the exact install command and asks before running it.
 
 ## Country codes
 
@@ -135,44 +142,47 @@ For manual lookup of codes, you can use the official ISO website: [https://www.i
 ### Common use cases
 
 ```bash
+# Options also work when running straight from GitHub
+bash <(curl -fsSL https://raw.githubusercontent.com/XaksFlaX/ipregion-fixed/main/ipregion.sh) --group primary
+
 # Show help message
-./ipregion.sh --help
+bash ipregion.sh --help
 
 # Check all services with default settings
-./ipregion.sh
+bash ipregion.sh
 
 # Check only GeoIP services
-./ipregion.sh --group primary
+bash ipregion.sh --group primary
 
 # Check only CDN services
-./ipregion.sh --group cdn
+bash ipregion.sh --group cdn
 
 # Check only popular web services
-./ipregion.sh --group custom
+bash ipregion.sh --group custom
 
 # Test only IPv4
-./ipregion.sh --ipv4
+bash ipregion.sh --ipv4
 
 # Test only IPv6
-./ipregion.sh --ipv6
+bash ipregion.sh --ipv6
 
 # Use SOCKS5 proxy
-./ipregion.sh --proxy 127.0.0.1:1080
+bash ipregion.sh --proxy 127.0.0.1:1080
 
 # Use a specific network interface
-./ipregion.sh --interface eth1
+bash ipregion.sh --interface eth1
 
 # Set custom curl request timeout in seconds
-./ipregion.sh --timeout 20
+bash ipregion.sh --timeout 20
 
 # Check services one by one instead of 6 at a time
-./ipregion.sh --parallel 1
+bash ipregion.sh --parallel 1
 
 # Output result as JSON
-./ipregion.sh --json
+bash ipregion.sh --json
 
 # Enable verbose logging
-./ipregion.sh --verbose
+bash ipregion.sh --verbose
 ```
 
 All options available in the help message (`-h, --help`) can be used and combined.
@@ -188,7 +198,7 @@ Options:
   -h, --help           Show this help message and exit
   -v, --verbose        Enable verbose logging
   -j, --json           Output results in JSON format
-  -g, --group GROUP    Run only one group: 'primary', 'custom', 'cdn' or 'all' (default: all)
+  -g, --group GROUP    Run only one group: 'primary', 'custom', 'cdn', or 'all' (default: all)
   -t, --timeout SEC    Set curl request timeout in seconds (default: 6)
   -4, --ipv4           Test only IPv4
   -6, --ipv6           Test only IPv6
@@ -198,17 +208,17 @@ Options:
       --no-update-check  Do not check GitHub for a newer version of this script
 
 Examples:
-  ipregion.sh                       # Check all services with default settings
-  ipregion.sh -g primary            # Check only GeoIP services
-  ipregion.sh -g custom             # Check only popular websites
-  ipregion.sh -g cdn                # Check only CDN
-  ipregion.sh -4                    # Test only IPv4
-  ipregion.sh -6                    # Test only IPv6
-  ipregion.sh -p 127.0.0.1:1080     # Use SOCKS5 proxy
-  ipregion.sh -i eth1               # Use network interface eth1
-  ipregion.sh -j                    # Output result as JSON
-  ipregion.sh -v                    # Enable verbose logging
-  ipregion.sh -P 1                  # Check services one by one
+  ipregion.sh                     # Check all services with default settings
+  ipregion.sh -g primary          # Check only GeoIP services
+  ipregion.sh -g custom           # Check only popular websites
+  ipregion.sh -g cdn              # Check only CDN endpoints
+  ipregion.sh -4                  # Test only IPv4
+  ipregion.sh -6                  # Test only IPv6
+  ipregion.sh -p 127.0.0.1:1080   # Use SOCKS5 proxy
+  ipregion.sh -i eth1             # Use network interface eth1
+  ipregion.sh -j                  # Output result as JSON
+  ipregion.sh -v                  # Enable verbose logging
+  ipregion.sh -P 1                # Check services one by one
 ```
 
 ## Versions and caching
