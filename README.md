@@ -149,7 +149,8 @@ Compared to the original script, [Davoyan/ipregion](https://github.com/Davoyan/i
 - **Country names + percentage stats**: alongside ISO codes, shows country names and percentage distribution across services
 - **Fixed minor bugs**, e.g., inability to interrupt the script during execution.
 
-The list above is quoted from Davoyan's README. In this fork the CDN rows are shown in the full table again (see above).
+The list above is quoted from Davoyan's README. In this fork the CDN rows are shown in the full table again (see above),
+and the ASN comes from ipinfo.io instead of the IPQuality author's server (see [Privacy](#privacy)).
 
 ## Main features
 
@@ -261,6 +262,25 @@ Examples:
   ipregion.sh -v                  # Enable verbose logging
   ipregion.sh -P 1                # Check services one by one
 ```
+
+## Privacy
+
+Every check is a request to someone else's service, so these services see the server's IP address (and a browser
+User-Agent). Nothing else is sent: no host name, files or settings, no results, no run counters, no uploaded reports.
+
+Who sees the IP during a run:
+
+- the services being checked (Google, Netflix, ChatGPT, Reddit…) — that is the point of the check;
+- GeoIP and reputation databases (MaxMind, ipinfo, ip-api, proxycheck…) — they get the address in the request;
+- helpers: ident.me, ifconfig.me, ipify and icanhazip (external IP), edns.ip-api.com (DNS resolver),
+  GitHub (update check, `--no-update-check` turns it off);
+- the DNS-over-HTTPS resolver: names are resolved via Cloudflare `1.1.1.1` (Quad9, OpenDNS or AdGuard if it is
+  unreachable), which sees the names the script looks up; with `-p` the proxy resolves them instead;
+- air-port-codes.com gets only an airport code, restcountries.com only a country name.
+
+The ASN used to be looked up at ipinfo.check.place (the IPQuality author's server) with geoip.oxl.app as a fallback;
+now it is taken from the ipinfo.io answer the script requests anyway, so there is no third party in between.
+With `-p` all requests go through the proxy, and the services see the proxy's address instead.
 
 ## Versions and caching
 

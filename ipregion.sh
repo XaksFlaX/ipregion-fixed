@@ -4,7 +4,7 @@
 shopt -s extglob
 
 # YYYY.MM.DD.N, N = change of the day. Bump on every change of this file (CI checks it)
-SCRIPT_VERSION="2026.10.23.11"
+SCRIPT_VERSION="2026.10.23.12"
 SCRIPT_URL="https://github.com/XaksFlaX/ipregion-fixed"
 DEPENDENCIES=("jq" "curl" "util-linux")
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
@@ -1003,33 +1003,29 @@ get_external_ip() {
   fi
 }
 
+# ASN from the ipinfo.io answer that the ipinfo.io and "Network (ipinfo)" rows use anyway:
+# ipinfo_widget caches it, so this adds no request and no third party (it used to come from
+# ipinfo.check.place, the IPQuality author's server, with geoip.oxl.app as a fallback)
 get_asn() {
-  local ip ip_version response
+  local ip_version=4 response
 
-  if [[ -n "$EXTERNAL_IPV4" ]]; then
-    ip="$EXTERNAL_IPV4"
-    ip_version=4
-  else
-    ip="$EXTERNAL_IPV6"
+  if [[ -z "$EXTERNAL_IPV4" || "$IPV6_ONLY" == true ]]; then
     ip_version=6
   fi
 
-  log "$LOG_INFO" "Getting ASN info for IP $ip"
+  log "$LOG_INFO" "Getting ASN info from ipinfo.io (IPv$ip_version)"
 
-  response=$(make_request GET "https://ipinfo.check.place/$ip" --ip-version "$ip_version" 2>/dev/null)
-  asn=$(process_json "$response" ".ASN.AutonomousSystemNumber")
-  asn_name=$(process_json "$response" ".ASN.AutonomousSystemOrganization")
+  response=$(ipinfo_widget "$ip_version")
+  asn=""
+  asn_name=""
 
-  if [[ -z "$asn" || "$asn" == "null" || -z "$asn_name" || "$asn_name" == "null" ]]; then
-    log "$LOG_INFO" "Primary source failed, trying backup source"
-    response=$(make_request GET "https://geoip.oxl.app/api/ip/$ip" --ip-version "$ip_version")
-    asn=$(process_json "$response" ".asn")
-    asn_name=$(process_json "$response" ".organization.name")
-    asn_name=${asn_name#null}
-    log "$LOG_INFO" "ASN info (backup source): AS$asn $asn_name"
-  else
-    log "$LOG_INFO" "ASN info (primary source): AS$asn $asn_name"
+  if is_valid_json "$response"; then
+    asn=$(process_json "$response" '.data.asn.asn // empty')
+    asn=${asn#AS}
+    asn_name=$(process_json "$response" '.data.asn.name // empty')
   fi
+
+  log "$LOG_INFO" "ASN info: ${asn:+AS$asn} $asn_name"
 }
 
 get_iata_location() {
@@ -1759,7 +1755,11 @@ print_header() {
     printf "%s: %s\n" "$(color HEADER 'IPv6')" "$(bold "$(mask_ipv6 "$ipv6")")"
   fi
 
-  printf "%s: %s\n\n" "$(color HEADER 'ASN')" "$(bold "AS$asn $asn_name")"
+  if [[ -n "$asn" ]]; then
+    printf "%s: %s\n\n" "$(color HEADER 'ASN')" "$(bold "AS$asn $asn_name")"
+  else
+    printf "%s: %s\n\n" "$(color HEADER 'ASN')" "$(color NULL "N/A")"
+  fi
 }
 
 print_legend() {
