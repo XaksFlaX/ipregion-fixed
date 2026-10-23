@@ -7,7 +7,7 @@ Bash-скрипт, который показывает, в какой стран
 
 Это форк [Davoyan/ipregion](https://github.com/Davoyan/ipregion), который, в свою очередь, форк [оригинального скрипта](https://github.com/vernette/ipregion/).
 Здесь исправлены утечки мимо прокси и установка пакетов без спроса, добавлены проверки доступности ChatGPT, Claude, Gemini,
-Copilot и Netflix, возвращена проверка Disney+ из оригинала. Скрипт показывает, считается ли IP хостингом или VPN и какой
+Copilot, Grok и Netflix, возвращена проверка Disney+ из оригинала. Скрипт показывает, считается ли IP хостингом или VPN и какой
 DNS-резолвер используется, а в конце печатает короткий итог. Проверки идут параллельно. Подробности ниже.
 
 ## Запуск
@@ -60,6 +60,7 @@ VPS в Молдове, версия 2026.10.23.7 (IP-адреса, ASN и имя
 
 | Gemini Access | `Yes` / `No` | страна, которую видит Google, ищется в официальном [списке регионов, где доступен Gemini API](https://ai.google.dev/gemini-api/docs/available-regions) (скачивается при каждом запуске) |
 | Copilot Access | `Yes` / `No` | `copilot.microsoft.com` стоит за Cloudflare, который отвечает `error code: 1009` («доступ из страны запрещён») там, где Copilot не работает |
+| Grok Access | `Yes` / `No` | API xAI без ключа отвечает `401` там, где Grok работает, и `403` «This service is not available in your region.» в остальных странах |
 
 Disney+ и Gemini взяты из [оригинального скрипта](https://github.com/vernette/ipregion/) (в форке Davoyan обе проверки убрали):
 Disney+ — с тем же запросом, Gemini — с той же идеей (список регионов Google, сравнение названий по словам), но без скачивания
@@ -84,7 +85,7 @@ Disney+ — с тем же запросом, Gemini — с той же идее�
 
 ```text
 Summary (IPv4)
-Works           Google Search, YouTube Premium, ChatGPT, Claude, Gemini, Copilot, Netflix, Disney+, Spotify
+Works           Google Search, YouTube Premium, ChatGPT, Claude, Gemini, Copilot, Grok, Netflix, Disney+, Spotify
 Not available   Reddit
 IP flagged as   Hosting (ipinfo), Hosting (ip-api), VPN (proxycheck)
 ```

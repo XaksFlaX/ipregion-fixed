@@ -4,7 +4,7 @@
 shopt -s extglob
 
 # YYYY.MM.DD.N, N = change of the day. Bump on every change of this file (CI checks it)
-SCRIPT_VERSION="2026.10.23.7"
+SCRIPT_VERSION="2026.10.23.8"
 SCRIPT_URL="https://github.com/XaksFlaX/ipregion-fixed"
 DEPENDENCIES=("jq" "curl" "util-linux")
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
@@ -405,6 +405,7 @@ declare -A CUSTOM_SERVICES=(
   [CLAUDE_ACCESS]="Claude Access"
   [GEMINI_ACCESS]="Gemini Access"
   [COPILOT_ACCESS]="Copilot Access"
+  [GROK_ACCESS]="Grok Access"
   [NETFLIX]="Netflix"
   [NETFLIX_CATALOG]="Netflix Catalog"
   [DISNEY_PLUS]="Disney+"
@@ -435,6 +436,7 @@ CUSTOM_SERVICES_ORDER=(
   "CLAUDE_ACCESS"
   "GEMINI_ACCESS"
   "COPILOT_ACCESS"
+  "GROK_ACCESS"
   "NETFLIX"
   "NETFLIX_CATALOG"
   "DISNEY_PLUS"
@@ -465,6 +467,7 @@ declare -A CUSTOM_SERVICES_HANDLERS=(
   [CLAUDE_ACCESS]="lookup_claude_access"
   [GEMINI_ACCESS]="lookup_gemini_access"
   [COPILOT_ACCESS]="lookup_copilot_access"
+  [GROK_ACCESS]="lookup_grok_access"
   [NETFLIX]="lookup_netflix"
   [NETFLIX_CATALOG]="lookup_netflix_catalog"
   [DISNEY_PLUS]="lookup_disney_plus"
@@ -1931,7 +1934,7 @@ SUMMARY_FILTER='
   def names: {
     "Google Search Captcha": "Google Search", "YouTube Premium": "YouTube Premium",
     "YouTube Music": "YouTube Music", "ChatGPT Access": "ChatGPT", "Claude Access": "Claude",
-    "Gemini Access": "Gemini", "Copilot Access": "Copilot", "Netflix Catalog": "Netflix",
+    "Gemini Access": "Gemini", "Copilot Access": "Copilot", "Grok Access": "Grok", "Netflix Catalog": "Netflix",
     "Disney+": "Disney+", "Spotify Signup": "Spotify", "Reddit": "Reddit", "Amazon Prime": "Prime Video"
   };
   def kind:
@@ -2502,6 +2505,22 @@ lookup_copilot_access() {
     print_value_or_colored "No" "HEART"
   elif [[ "$http_code" == "200" ]]; then
     print_value_or_colored "Yes" "SERVICE"
+  fi
+}
+
+# Without a key the xAI API answers 401 where Grok works, and 403 with a page
+# "This service is not available in your region." elsewhere (grok.com answers the same way)
+lookup_grok_access() {
+  local ip_version="$1"
+  local response http_code
+
+  response=$(make_request GET "https://api.x.ai/v1/models" --ip-version "$ip_version" --with-status)
+  http_code=$(tail -n1 <<<"$response")
+
+  if [[ "$http_code" == "401" ]]; then
+    print_value_or_colored "Yes" "SERVICE"
+  elif [[ "$http_code" == "403" ]] && grep -q "not available in your region" <<<"$response"; then
+    print_value_or_colored "No" "HEART"
   fi
 }
 

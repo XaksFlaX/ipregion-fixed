@@ -4,8 +4,8 @@
 
 A bash script for determining your IP geolocation using various GeoIP services and popular websites.  
 This is a fork of [Davoyan/ipregion](https://github.com/Davoyan/ipregion) (itself a fork of the [original script](https://github.com/vernette/ipregion/))
-that fixes proxy leaks and unattended package installs, adds availability checks for ChatGPT, Claude, Gemini, Copilot
-and Netflix, brings back the Disney+ check of the original script, shows whether the IP is flagged as hosting or VPN
+that fixes proxy leaks and unattended package installs, adds availability checks for ChatGPT, Claude, Gemini, Copilot,
+Grok and Netflix, brings back the Disney+ check of the original script, shows whether the IP is flagged as hosting or VPN
 and which DNS resolver it uses, ends with a short summary and runs the checks in parallel. Details below.
 
 ## Usage
@@ -55,6 +55,7 @@ How to read it:
 | Disney+ | country / `No` | Disney+ device registration reports whether the location is supported and which country it sees; `No` also when Disney refuses this IP with "Forbidden location" (seen for hosting IPs even in countries where Disney+ works) |
 | Gemini Access | `Yes` / `No` | the country Google sees, looked up in Google's [list of regions where the Gemini API is available](https://ai.google.dev/gemini-api/docs/available-regions) (downloaded on each run) |
 | Copilot Access | `Yes` / `No` | `copilot.microsoft.com` is behind Cloudflare, which answers `error code: 1009` (country banned) where Copilot is not offered |
+| Grok Access | `Yes` / `No` | without a key the xAI API answers `401` where Grok works and `403` "This service is not available in your region." elsewhere |
 
 Disney+ and Gemini come from the [original script](https://github.com/vernette/ipregion/) (both were dropped in Davoyan's fork):
 Disney+ uses the same request, Gemini the same idea (Google's region list, names compared word by word) without the extra
@@ -79,7 +80,7 @@ After the legend the script prints a short verdict for each IP version:
 
 ```text
 Summary (IPv4)
-Works           Google Search, YouTube Premium, ChatGPT, Claude, Gemini, Copilot, Netflix, Disney+, Spotify
+Works           Google Search, YouTube Premium, ChatGPT, Claude, Gemini, Copilot, Grok, Netflix, Disney+, Spotify
 Not available   Reddit
 IP flagged as   Hosting (ipinfo), Hosting (ip-api), VPN (proxycheck)
 ```
