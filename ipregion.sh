@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 
-SCRIPT_URL="https://github.com/Davoyan/ipregion"
+SCRIPT_URL="https://github.com/XaksFlaX/ipregion-fixed"
 DEPENDENCIES=("jq" "curl" "util-linux")
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
 SPINNER_SERVICE_FILE=$(mktemp "${TMPDIR:-/tmp}/ipregion_spinner_XXXXXX")
+# spinner_stop only runs in the interactive mode, so -j/-v runs clean up here
+trap 'rm -f "$SPINNER_SERVICE_FILE"' EXIT
 
 SPOTIFY_API_KEY="142b583129b2df829de3656f9eb484e6"
 SPOTIFY_CLIENT_ID="9a8d2f0ce77a4e248bb71fefcb557637"
@@ -448,14 +450,14 @@ declare -A SERVICE_GROUPS=(
 EXCLUDED_SERVICES=(
   # "IPINFO_IO"
   # "IPREGISTRY"
-  # "IPAPI_CO"
+  "IPAPI_CO" # answers 429 RateLimited to datacenter IPs
 )
 
 IDENTITY_SERVICES=(
   "ident.me"
   "ifconfig.me"
   "api64.ipify.org"
-  "ifconfig.me"
+  "icanhazip.com"
 )
 
 IPV6_OVER_IPV4_SERVICES=(
@@ -588,19 +590,61 @@ check_missing_dependencies() {
 }
 
 prompt_for_installation() {
-  local missing_pkgs=("$@")
+  local command="$1"
+  local missing_pkgs=("${@:2}")
+  local answer
 
   echo "Missing dependencies: ${missing_pkgs[*]}"
-  read -r -p "Do you want to install them? [y/N]: " answer
-  answer=${answer,,}
+  echo "Will run: $command"
+  read -r -p "Install now? [y/N]: " answer
 
   case "${answer,,}" in
     y | yes)
       return 0
       ;;
     *)
+      echo "Nothing installed. To install manually: $command"
       exit 0
       ;;
+  esac
+}
+
+# Package names to install for the missing dependencies
+resolve_packages() {
+  local pkg_manager="$1"
+  local pkg
+  shift
+
+  for pkg in "$@"; do
+    if [[ "$pkg_manager" == "apt" && "$pkg" == "util-linux" ]]; then
+      # util-linux is always installed on Debian/Ubuntu, column comes from
+      # bsdextrautils (Debian 11+, Ubuntu 21.04+) or bsdmainutils on older releases
+      if apt-cache show bsdextrautils >/dev/null 2>&1; then
+        echo "bsdextrautils"
+      else
+        echo "bsdmainutils"
+      fi
+    else
+      echo "$pkg"
+    fi
+  done
+}
+
+# The same commands install_with_package_manager runs, shown before asking
+describe_install_command() {
+  local pkg_manager="$1"
+  local packages="${*:2}"
+  local sudo_prefix=""
+
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    sudo_prefix="sudo "
+  fi
+
+  case "$pkg_manager" in
+    apt) echo "${sudo_prefix}apt update && ${sudo_prefix}apt install -y $packages" ;;
+    pacman) echo "${sudo_prefix}pacman -S --needed --noconfirm $packages" ;;
+    dnf) echo "${sudo_prefix}dnf install -y $packages" ;;
+    termux) echo "apt update && apt install -y $packages" ;;
   esac
 }
 
@@ -644,14 +688,15 @@ install_with_package_manager() {
 
   case "$pkg_manager" in
     *apt)
+      # NEEDRESTART_MODE is left at its default so services are never restarted silently
       $use_sudo "$pkg_manager" update
-      if [[ " ${packages[*]} " == *" util-linux "* ]]; then
-        $use_sudo env NEEDRESTART_MODE=a "$pkg_manager" install -y util-linux bsdmainutils
-      fi
-      $use_sudo env NEEDRESTART_MODE=a "$pkg_manager" install -y "${packages[@]}"
+      $use_sudo "$pkg_manager" install -y "${packages[@]}"
       ;;
     *pacman)
-      $use_sudo "$pkg_manager" -Syy --noconfirm "${packages[@]}"
+      # No -y: refreshing the database without -u is a partial upgrade
+      if ! $use_sudo "$pkg_manager" -S --needed --noconfirm "${packages[@]}"; then
+        error_exit "pacman could not install ${packages[*]}. Run 'pacman -Syu' first, then start the script again."
+      fi
       ;;
     *dnf)
       $use_sudo "$pkg_manager" install -y "${packages[@]}"
@@ -667,8 +712,8 @@ install_with_package_manager() {
 }
 
 install_dependencies() {
-  local missing_packages
-  local pkg_manager
+  local missing_packages packages
+  local pkg_manager command
 
   log "$LOG_INFO" "Checking for dependencies"
   read -r -a missing_packages <<<"$(check_missing_dependencies)"
@@ -678,13 +723,20 @@ install_dependencies() {
     return 0
   fi
 
-  prompt_for_installation "${missing_packages[@]}" </dev/tty
-
-  pkg_manager=$(get_package_manager)
+  pkg_manager=$(get_package_manager) || exit 1
   log "$LOG_INFO" "Detected package manager: $pkg_manager"
 
+  read -r -a packages <<<"$(resolve_packages "$pkg_manager" "${missing_packages[@]}" | tr '\n' ' ')"
+  command=$(describe_install_command "$pkg_manager" "${packages[@]}")
+
+  # Without a terminal (ssh host 'bash -s', cron) the redirect fails and the prompt
+  # never runs: stop instead of installing packages unasked
+  if ! prompt_for_installation "$command" "${missing_packages[@]}" </dev/tty; then
+    error_exit "Missing dependencies: ${missing_packages[*]}. No terminal to ask, install them manually: $command"
+  fi
+
   log "$LOG_INFO" "Installing missing dependencies"
-  install_with_package_manager "$pkg_manager" "${missing_packages[@]}"
+  install_with_package_manager "$pkg_manager" "${packages[@]}"
 }
 
 is_valid_json() {
@@ -803,13 +855,6 @@ check_ip_support() {
   log "$LOG_WARN" "IPv${version} is not supported on this system"
   return 1
 }
-
-IDENTITY_SERVICES=(
-  "ident.me"
-  "ifconfig.me"
-  "api64.ipify.org"
-  "ifconfig.me"
-)
 
 get_external_ip() {
   local results=()
@@ -988,15 +1033,24 @@ make_request() {
     --retry "$CURL_RETRIES"
     --connect-timeout "$CURL_TIMEOUT"
     --max-time "$CURL_TIMEOUT"
-    --request "$method"
     -w '\n%{http_code}'
   )
+
+  if [[ "$method" == "HEAD" ]]; then
+    curl_args+=(--head)
+  else
+    curl_args+=(--request "$method")
+  fi
 
   while (($#)); do
     case "$1" in
       --ip-version)
         ip_version="$2"
         shift 2
+        ;;
+      --follow)
+        curl_args+=(--location)
+        shift
         ;;
       --user-agent)
         user_agent="$2"
@@ -1019,7 +1073,7 @@ make_request() {
 
   if [[ "$ip_version" == "4" ]]; then
     curl_args+=(-4)
-  else
+  elif [[ "$ip_version" == "6" ]]; then
     curl_args+=(-6)
   fi
 
@@ -1041,8 +1095,9 @@ make_request() {
     curl_args+=(-H 'Content-Type: application/x-www-form-urlencoded')
   fi
 
+  # socks5h: hostnames are resolved by the proxy, so DNS does not leak past it
   if [[ -n "$PROXY_ADDR" ]]; then
-    curl_args+=(--proxy "socks5://$PROXY_ADDR")
+    curl_args+=(--proxy "socks5h://$PROXY_ADDR")
   fi
 
   if [[ -n "$INTERFACE_NAME" ]]; then
@@ -1168,7 +1223,8 @@ process_response() {
       jq_filter='.[0].country'
       ;;
     IPAPI_IS)
-      jq_filter='.location.country_code'
+      # The free tier now returns only the country name ("The Netherlands")
+      jq_filter='.location.country_code // .country'
       ;;
     IPBASE_COM)
       jq_filter='.data.location.country.alpha2'
@@ -1187,7 +1243,28 @@ process_response() {
       ;;
   esac
 
-  process_json "$response" "$jq_filter"
+  local value
+  value=$(process_json "$response" "$jq_filter")
+
+  if [[ "$service" == "IPAPI_IS" && ${#value} -gt 2 && "$value" != "null" ]]; then
+    value=$(country_code_by_name "$value")
+  fi
+
+  echo "$value"
+}
+
+country_code_by_name() {
+  local name="${1,,}"
+  local code
+
+  name="${name#the }"
+
+  for code in "${!COUNTRY_NAMES[@]}"; do
+    if [[ "${COUNTRY_NAMES[$code],,}" == "$name" ]]; then
+      echo "$code"
+      return
+    fi
+  done
 }
 
 process_service() {
@@ -1492,7 +1569,7 @@ print_header() {
   ipv4=$(process_json "$RESULT_JSON" ".ipv4")
   ipv6=$(process_json "$RESULT_JSON" ".ipv6")
 
-  printf "%s\n%s\n\n" "$(color URL "Forked by Davoyan")" "$(color URL "$SCRIPT_URL")"
+  printf "%s\n%s\n\n" "$(color URL "Fork of Davoyan/ipregion")" "$(color URL "$SCRIPT_URL")"
 
   if [[ -n "$EXTERNAL_IPV4" ]]; then
     printf "%s: %s\n" "$(color HEADER 'IPv4')" "$(bold "$(mask_ipv4 "$ipv4")")"
@@ -1690,9 +1767,10 @@ lookup_iplocation_com() {
 
 lookup_2ip() {
   local ip_version="$1"
-  local response ip
+  local response
 
-  response=$(make_request GET "https://api.2ip.io" --ip-version "$ip_version" --data "ip=$ip")
+  # api.2ip.io describes the caller's own address, so the transport picks IPv4 or IPv6
+  response=$(make_request GET "https://api.2ip.io" --ip-version "$ip_version")
   process_json "$response" ".code"
 }
 
@@ -1700,7 +1778,7 @@ get_country_code() {
     local country="$1"
     local json
 
-    json=$(curl $SELECTED_DOH_URL --max-time 5 -s "https://restcountries.com/v3.1/all?fields=name,cca2")
+    json=$(make_request GET "https://restcountries.com/v3.1/all?fields=name,cca2")
     if [[ -z "$json" ]] || ! grep -q '"name"' <<<"$json"; then
         echo ""
         return
@@ -1730,26 +1808,22 @@ lookup_google() {
   fi
   
   if [[ -z "$result" ]]; then
-    local curl_ip_flag country
-	if [[ "$ip_version" == "4" ]]; then
-		curl_ip_flag="-4"
-	elif [[ "$ip_version" == "6" ]]; then
-		curl_ip_flag="-6"
-	else
-		curl_ip_flag="-4"
-	fi
-	
-	curl_args=()
-	
-	if [[ -n "$PROXY_ADDR" ]]; then
-	  curl_args+=(--proxy "socks5://$PROXY_ADDR")
-	fi
+    local country
 
-	if [[ -n "$INTERFACE_NAME" ]]; then
-	  curl_args+=(--interface "$INTERFACE_NAME")
-	fi
-	
-    country=$(timeout "$CURL_TIMEOUT" curl $SELECTED_DOH_URL $curl_ip_flag -sL "${curl_args[@]}" 'https://play.google.com/'   -H 'accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7'   -H 'accept-language: en-US;q=0.9'   -H 'priority: u=0, i'   -H 'sec-ch-ua: "Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"'   -H 'sec-ch-ua-mobile: ?0'   -H 'sec-ch-ua-platform: "Windows"'   -H 'sec-fetch-dest: document'   -H 'sec-fetch-mode: navigate'   -H 'sec-fetch-site: none'   -H 'sec-fetch-user: ?1'   -H 'upgrade-insecure-requests: 1' -H 'user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36' | grep -oP '<div class="yVZQTb">\K[^<(]+')
+    country=$(make_request GET 'https://play.google.com/' --follow --ip-version "$ip_version" \
+      --user-agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36' \
+      --header 'accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7' \
+      --header 'accept-language: en-US;q=0.9' \
+      --header 'priority: u=0, i' \
+      --header 'sec-ch-ua: "Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"' \
+      --header 'sec-ch-ua-mobile: ?0' \
+      --header 'sec-ch-ua-platform: "Windows"' \
+      --header 'sec-fetch-dest: document' \
+      --header 'sec-fetch-mode: navigate' \
+      --header 'sec-fetch-site: none' \
+      --header 'sec-fetch-user: ?1' \
+      --header 'upgrade-insecure-requests: 1' \
+      | grep -oP '<div class="yVZQTb">\K[^<(]+')
 
 	country=$(echo "$country" | xargs)  # убираем пробелы
 	if [[ -n "$country" ]]; then
@@ -1975,26 +2049,8 @@ lookup_google_search_captcha() {
 
 lookup_bing() {
   local ip_version="$1"
-  local curl_ip_flag country
-  if [[ "$ip_version" == "4" ]]; then
-	  curl_ip_flag="-4"
-  elif [[ "$ip_version" == "6" ]]; then
-	  curl_ip_flag="-6"
-  else
-	  curl_ip_flag="-4"
-  fi
 
-  curl_args=()
-
-  if [[ -n "$PROXY_ADDR" ]]; then
-    curl_args+=(--proxy "socks5://$PROXY_ADDR")
-  fi
-
-  if [[ -n "$INTERFACE_NAME" ]]; then
-    curl_args+=(--interface "$INTERFACE_NAME")
-  fi
-	  
-  local tmpresult=$(timeout "$CURL_TIMEOUT" curl $SELECTED_DOH_URL -sL $curl_ip_flag "${curl_args[@]}" "https://www.bing.com/search?q=cats" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36")
+  local tmpresult=$(make_request GET "https://www.bing.com/search?q=cats" --follow --ip-version "$ip_version" --user-agent "$USER_AGENT")
   
   local isCN=$(echo "$tmpresult" | grep 'cn.bing.com')
   local region=$(echo "$tmpresult" | grep -woP 'Region\s{0,}:\s{0,}"\K[^"]+')
@@ -2004,9 +2060,10 @@ lookup_bing() {
   fi
   
   region="${region:0:2}"
-  
-  if [[ "$region" == "WW" ]]; then
-	tmpresult=$(timeout "$CURL_TIMEOUT" curl $SELECTED_DOH_URL -s "https://login.live.com" $curl_ip_flag "${curl_args[@]}" --user-agent "$USER_AGENT")
+
+  # WW (worldwide), XL (Latin America) and other market codes are not countries
+  if [[ -z "$region" || "$region" == "WW" || "$region" == "EU" || -z "${COUNTRY_NAMES[$region]+x}" ]]; then
+	tmpresult=$(make_request GET "https://login.live.com" --ip-version "$ip_version" --user-agent "$USER_AGENT")
 	region=$(echo "$tmpresult" | grep -oP '"sRequestCountry":"\K[^"]*' | head -n1)
   fi
 
@@ -2018,9 +2075,10 @@ lookup_spotify_signup() {
   local ip_version="$1"
   local response status is_country_launched available color_name
 
-  response=$(timeout "$CURL_TIMEOUT" curl $SELECTED_DOH_URL -s "https://spclient.wg.spotify.com/signup/public/v1/account/?validate=1&key=$SPOTIFY_API_KEY" $curl_ip_flag "${curl_args[@]}" \
+  response=$(make_request GET "https://spclient.wg.spotify.com/signup/public/v1/account/?validate=1&key=$SPOTIFY_API_KEY" \
+    --ip-version "$ip_version" \
     --header "X-Client-Id: $SPOTIFY_CLIENT_ID" \
-	--user-agent "$USER_AGENT")
+    --user-agent "$USER_AGENT")
 
   status=$(process_json "$response" ".status")
   is_country_launched=$(process_json "$response" ".is_country_launched")
@@ -2038,37 +2096,16 @@ lookup_spotify_signup() {
 
 lookup_amazon_prime() {
   local ip_version="$1"
-  local curl_ip_flag
-  if [[ "$ip_version" == "4" ]]; then
-	  curl_ip_flag="-4"
-  elif [[ "$ip_version" == "6" ]]; then
-	  curl_ip_flag="-6"
-  else
-	  curl_ip_flag="-4"
-  fi
 
-  curl_args=()
+  local tmpresult=$(make_request GET "https://www.primevideo.com" --follow --ip-version "$ip_version" --user-agent "$USER_AGENT")
 
-  if [[ -n "$PROXY_ADDR" ]]; then
-    curl_args+=(--proxy "socks5://$PROXY_ADDR")
-  fi
-
-  if [[ -n "$INTERFACE_NAME" ]]; then
-    curl_args+=(--interface "$INTERFACE_NAME")
-  fi
-	  
-  local tmpresult=$(timeout "$CURL_TIMEOUT" curl $SELECTED_DOH_URL -sL $curl_ip_flag "${curl_args[@]}" "https://www.primevideo.com" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36")
-  
   local isBlocked=$(echo "$tmpresult" | grep -i 'isServiceRestricted')
   local region=$(echo "$tmpresult" | grep -woP '"currentTerritory":"\K[^"]+' | head -n 1)
-  
-  if [[ -z "$is_available" ]]; then
-    region="${region:0:2}"
-    echo "$region"
+
+  if [[ -n "$isBlocked" ]]; then
+    print_value_or_colored "No" "HEART"
   else
-    is_available="No"
-    color_name="HEART"
-	print_value_or_colored "$is_available" "$color_name"
+    echo "${region:0:2}"
   fi
 }
 
@@ -2079,20 +2116,9 @@ lookup_apple() {
 
 lookup_steam() {
   local ip_version="$1"
-  local curl_ip_flag
-  if [[ "$ip_version" == "6" ]]; then
-    curl_ip_flag="-6"
-  else
-    curl_ip_flag="-4"
-  fi
-
-  local curl_args=()
-  [[ -n "$PROXY_ADDR" ]] && curl_args+=(--proxy "socks5://$PROXY_ADDR")
-  [[ -n "$INTERFACE_NAME" ]] && curl_args+=(--interface "$INTERFACE_NAME")
-
   local tmpresult
-  tmpresult=$(timeout "$CURL_TIMEOUT" curl $SELECTED_DOH_URL -sI "https://store.steampowered.com" $curl_ip_flag "${curl_args[@]}" \
-    --user-agent "$USER_AGENT")
+
+  tmpresult=$(make_request HEAD "https://store.steampowered.com" --ip-version "$ip_version" --user-agent "$USER_AGENT")
 
   echo "$tmpresult" | grep -oP 'steamCountry=\K[^%;]*'
 }
@@ -2110,8 +2136,19 @@ lookup_youtube_cdn() {
   local ip_version="$1"
   local response iata location
 
+  local name
+
   response=$(make_request GET "https://redirector.googlevideo.com/report_mapping?di=no" --ip-version "$ip_version")
-  iata=$(echo "$response" | awk '{print $3}' | cut -f2 -d'-' | cut -c1-3)
+  name=$(awk 'NR == 1 {print $3}' <<<"$response")
+
+  # Mapping names seen: "fra16s69", "waw40s03" (IATA + digits) and "tzfraa-cd" (tz + IATA + letter)
+  if [[ "$name" =~ (^|-)([a-z]{3})[0-9] ]]; then
+    iata="${BASH_REMATCH[2]}"
+  elif [[ "$name" =~ ^tz([a-z]{3}) ]]; then
+    iata="${BASH_REMATCH[1]}"
+  else
+    log "$LOG_WARN" "YouTube CDN: unknown mapping name '$name'"
+  fi
   iata=${iata^^}
 
   if [[ -z "$iata" ]]; then
@@ -2155,20 +2192,9 @@ lookup_jetbrains() {
 
 lookup_playstation() {
   local ip_version="$1"
-  local curl_ip_flag
-  if [[ "$ip_version" == "6" ]]; then
-    curl_ip_flag="-6"
-  else
-    curl_ip_flag="-4"
-  fi
-
-  local curl_args=()
-  [[ -n "$PROXY_ADDR" ]] && curl_args+=(--proxy "socks5://$PROXY_ADDR")
-  [[ -n "$INTERFACE_NAME" ]] && curl_args+=(--interface "$INTERFACE_NAME")
-
   local tmpresult
-  tmpresult=$(timeout "$CURL_TIMEOUT" curl $SELECTED_DOH_URL -sI "https://www.playstation.com" $curl_ip_flag "${curl_args[@]}" \
-    --user-agent "$USER_AGENT")
+
+  tmpresult=$(make_request HEAD "https://www.playstation.com" --ip-version "$ip_version" --user-agent "$USER_AGENT")
 
   echo "$tmpresult" | grep -i 'Set-Cookie: country=' | head -n1 | sed 's/.*country=\([A-Z]*\).*/\1/'
 }
@@ -2186,6 +2212,16 @@ check_doh() {
     local curl_opts=(-s --max-time 5 --connect-timeout 2 -o /dev/null)
 
     local entry name doh_url test_url
+
+    # With a SOCKS5 proxy the proxy resolves names itself (socks5h), DoH is not needed
+    if [[ -n "$PROXY_ADDR" ]]; then
+        SELECTED_DOH_URL=""
+        return 0
+    fi
+
+    if [[ -n "$INTERFACE_NAME" ]]; then
+        curl_opts+=(--interface "$INTERFACE_NAME")
+    fi
 
     for entry in "${resolvers[@]}"; do
         IFS="|" read -r name doh_url test_url <<<"$entry"

@@ -1,26 +1,48 @@
-# ipregion
+# ipregion-fixed
 
 A bash script for determining your IP geolocation using various GeoIP services and popular websites.  
-This is a **fork** of the [original script](https://github.com/vernette/ipregion/), with a number of improvements and fixes.
+This is a fork of [Davoyan/ipregion](https://github.com/Davoyan/ipregion) (itself a fork of the [original script](https://github.com/vernette/ipregion/))
+that fixes proxy leaks, unattended package installs and several broken lookups. Details below.
+
+## What is fixed
+
+Compared to [Davoyan/ipregion@a85abbf](https://github.com/Davoyan/ipregion/blob/a85abbf739e07b1162bee066d756be1e4b9bfcc0/ipregion.sh):
+
+- **SOCKS5 proxy no longer leaks.** Every request goes through one helper, so `-p` and `-i` apply everywhere
+  (before, the DoH check, Spotify Signup, Bing, Steam, PlayStation, Amazon Prime, Google Play and restcountries.com bypassed them).
+  The proxy is used as `socks5h://`, so DNS is resolved by the proxy as well; DoH is skipped when a proxy is set.
+- **No unattended package installs.** Without a terminal (`ssh host 'bash -s'`, cron) the old script skipped the
+  "install?" prompt and ran `apt install -y` as root. Now it stops and prints the command to run by hand.
+  In a terminal it shows the exact install command first and asks (the default answer is no).
+- **Safer installs:** no `NEEDRESTART_MODE=a` (services are not restarted silently), `column` comes from
+  `bsdextrautils`/`bsdmainutils` instead of reinstalling `util-linux`, and `pacman -S --needed` instead of a partial `-Syy` upgrade.
+- **External IP is confirmed by two different services** (`ifconfig.me` was listed twice; the second one is now `icanhazip.com`).
+- **Fixed lookups:** Amazon Prime blocking detection, 2ip.io request, ipapi.is (the API now returns only the country name),
+  Bing market codes such as `XL` and `WW` (falls back to login.live.com), YouTube CDN node names like `tzfraa-cd`.
+- **ipapi.co is excluded:** it answers `429 RateLimited` to datacenter IPs.
+- The temporary file is removed in `-j`/`-v` mode too.
+
+Not fixed: the Reddit check is empty from datacenter IPs (Reddit answers with a block page).
 
 ## Usage
-Run script:
+Run directly from GitHub:
 ```bash
-bash <(wget -qO- https://ipregion.xyz)
+bash <(curl -fsSL https://raw.githubusercontent.com/XaksFlaX/ipregion-fixed/main/ipregion.sh)
 ```
-Or run **directly** from GitHub:
+Safer: download a specific commit, check it, then run it as a regular user:
 ```bash
-bash <(wget -qO- https://raw.githubusercontent.com/Davoyan/ipregion/main/ipregion.sh)
+curl -fsSL https://raw.githubusercontent.com/XaksFlaX/ipregion-fixed/<commit>/ipregion.sh -o ipregion.sh
+less ipregion.sh
+bash ipregion.sh
 ```
-
 
 Output example:
 
 ![image](https://i.imgur.com/Bn1o644.png)
 
-## What's New in This Fork
+## What Davoyan's fork added
 
-Compared to the original script, this fork includes several improvements and fixes:
+Compared to the original script, [Davoyan/ipregion](https://github.com/Davoyan/ipregion) includes several improvements and fixes:
 
 - **Improved IPv6 detection** — previously unreliable in some cases.  
 - **Fixed freezes** on certain services.  
