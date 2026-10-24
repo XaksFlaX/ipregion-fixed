@@ -4,7 +4,7 @@
 shopt -s extglob
 
 # YYYY.MM.DD.N, N = change of the day. Bump on every change of this file (CI checks it)
-SCRIPT_VERSION="2026.10.23.14"
+SCRIPT_VERSION="2026.10.23.15"
 SCRIPT_URL="https://github.com/XaksFlaX/ipregion-fixed"
 DEPENDENCIES=("jq" "curl" "util-linux")
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
@@ -49,7 +49,9 @@ CURL_TIMEOUT=6
 CURL_RETRIES=1
 PARALLEL_JOBS=6
 UPDATE_CHECK=true
-UPDATE_CHECK_URL="https://raw.githubusercontent.com/XaksFlaX/ipregion-fixed/main/ipregion.sh"
+# The script of the latest GitHub release: the update notice compares with released versions,
+# not with whatever is on main
+UPDATE_CHECK_URL="https://github.com/XaksFlaX/ipregion-fixed/releases/latest/download/ipregion.sh"
 UPDATE_CHECK_PID=""
 LATEST_VERSION=""
 IPV4_ONLY=false
@@ -1885,14 +1887,15 @@ print_legend() {
 }
 
 # Runs in the background while the services are checked: reads SCRIPT_VERSION from the
-# first 2 KB of the script on GitHub. Failures are silent, the result goes to a file
+# first 2 KB of the latest release's script (GitHub redirects the release link, hence --follow).
+# Failures are silent, the result goes to a file
 start_update_check() {
   if [[ "$UPDATE_CHECK" != true ]]; then
     return
   fi
 
   (
-    make_request GET "$UPDATE_CHECK_URL" --header "Range: bytes=0-2047" \
+    make_request GET "$UPDATE_CHECK_URL" --follow --header "Range: bytes=0-2047" \
       | grep -m 1 -oP '^SCRIPT_VERSION="\K[0-9.]+(?=")' >"$WORK_DIR/latest_version"
   ) &
   UPDATE_CHECK_PID=$!

@@ -9,15 +9,21 @@ Grok and Netflix, brings back the Disney+ check of the original script, shows wh
 and which DNS resolver it uses, ends with a short summary and runs the checks in parallel. Details below.
 
 ## Usage
-Run directly from GitHub:
+The latest [release](https://github.com/XaksFlaX/ipregion-fixed/releases):
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/XaksFlaX/ipregion-fixed/main/ipregion.sh)
+bash <(curl -fsSL https://github.com/XaksFlaX/ipregion-fixed/releases/latest/download/ipregion.sh)
 ```
-Safer: download a specific commit, check it, then run it as a regular user:
+Safer: download the release, check its SHA-256, read it, then run it as a regular user:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/XaksFlaX/ipregion-fixed/<commit>/ipregion.sh -o ipregion.sh
+curl -fsSLO https://github.com/XaksFlaX/ipregion-fixed/releases/latest/download/ipregion.sh
+curl -fsSLO https://github.com/XaksFlaX/ipregion-fixed/releases/latest/download/ipregion.sh.sha256
+sha256sum -c ipregion.sh.sha256
 less ipregion.sh
 bash ipregion.sh
+```
+The development version from `main` (changes that are not released yet):
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/XaksFlaX/ipregion-fixed/main/ipregion.sh)
 ```
 
 ### Output example
@@ -192,7 +198,7 @@ For manual lookup of codes, you can use the official ISO website: [https://www.i
 
 ```bash
 # Options also work when running straight from GitHub
-bash <(curl -fsSL https://raw.githubusercontent.com/XaksFlaX/ipregion-fixed/main/ipregion.sh) --group primary
+bash <(curl -fsSL https://github.com/XaksFlaX/ipregion-fixed/releases/latest/download/ipregion.sh) --group primary
 
 # Show help message
 bash ipregion.sh --help
@@ -298,10 +304,13 @@ With `-p` all requests go through the proxy, and the services see the proxy's ad
 The first line of the output shows the version, e.g. `ipregion-fixed 2026.10.23.1`. Every change of `ipregion.sh` bumps
 `SCRIPT_VERSION` (`YYYY.MM.DD.N`), and GitHub Actions fails the build if it was not bumped.
 
-GitHub caches files under `raw.githubusercontent.com/.../main/...` for up to 5 minutes, so right after an update
-the `main` link may still serve the previous version. A link to a specific commit is never stale.
+Each released version is a [GitHub release](https://github.com/XaksFlaX/ipregion-fixed/releases) tagged `v<version>`
+with `ipregion.sh` and its SHA-256. `main` may be ahead of the latest release.
 
-While the services are checked, the script reads the latest version from GitHub (the first 2 KB of `ipregion.sh` on `main`).
+GitHub caches files under `raw.githubusercontent.com/.../main/...` for up to 5 minutes, so right after an update
+the `main` link may still serve the previous version. Release links and links to a specific commit are never stale.
+
+While the services are checked, the script reads the version of the latest release (the first 2 KB of its `ipregion.sh`).
 If it is newer, the output ends with "A newer version is available" and the command to run it; JSON gets `latest_version`.
 If GitHub is unreachable nothing is printed. `--no-update-check` turns this off.
 

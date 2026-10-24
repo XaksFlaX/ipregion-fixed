@@ -12,16 +12,23 @@ DNS-резолвер используется, а в конце печатает
 
 ## Запуск
 
-Прямо с GitHub:
+Последний [релиз](https://github.com/XaksFlaX/ipregion-fixed/releases):
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/XaksFlaX/ipregion-fixed/main/ipregion.sh)
+bash <(curl -fsSL https://github.com/XaksFlaX/ipregion-fixed/releases/latest/download/ipregion.sh)
 ```
 
-Надёжнее: скачать конкретный коммит, посмотреть его и запустить от обычного пользователя:
+Надёжнее: скачать релиз, сверить SHA-256, прочитать и запустить от обычного пользователя:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/XaksFlaX/ipregion-fixed/<коммит>/ipregion.sh -o ipregion.sh
+curl -fsSLO https://github.com/XaksFlaX/ipregion-fixed/releases/latest/download/ipregion.sh
+curl -fsSLO https://github.com/XaksFlaX/ipregion-fixed/releases/latest/download/ipregion.sh.sha256
+sha256sum -c ipregion.sh.sha256
 less ipregion.sh
 bash ipregion.sh
+```
+
+Версия в разработке из `main` (изменения, которые ещё не вышли в релизе):
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/XaksFlaX/ipregion-fixed/main/ipregion.sh)
 ```
 
 ### Пример вывода
@@ -196,7 +203,7 @@ IP flagged as   Hosting (ipinfo), Hosting (ip-api), VPN (proxycheck)
 
 ```bash
 # Опции работают и при запуске прямо с GitHub
-bash <(curl -fsSL https://raw.githubusercontent.com/XaksFlaX/ipregion-fixed/main/ipregion.sh) --group primary
+bash <(curl -fsSL https://github.com/XaksFlaX/ipregion-fixed/releases/latest/download/ipregion.sh) --group primary
 
 # Справка
 bash ipregion.sh --help
@@ -286,11 +293,14 @@ Options:
 В первой строке вывода указана версия, например `ipregion-fixed 2026.10.23.1`. С каждым изменением `ipregion.sh`
 поднимается `SCRIPT_VERSION` (`ГГГГ.ММ.ДД.N`), а GitHub Actions не пропускает изменение, если версию забыли поднять.
 
-GitHub кэширует файлы по ссылкам `raw.githubusercontent.com/.../main/...` до 5 минут, поэтому сразу после обновления
-ссылка на `main` может ещё отдавать прошлую версию. Ссылка на конкретный коммит всегда актуальна.
+Каждая выпущенная версия — это [релиз на GitHub](https://github.com/XaksFlaX/ipregion-fixed/releases) с тегом `v<версия>`,
+файлом `ipregion.sh` и его SHA-256. В `main` могут быть изменения, которые ещё не вошли в релиз.
 
-Пока идут проверки, скрипт узнаёт на GitHub номер последней версии (читает первые 2 КБ `ipregion.sh` из `main`).
-Если она новее, в конце вывода появится «A newer version is available» и команда для запуска, а в JSON — поле `latest_version`.
+GitHub кэширует файлы по ссылкам `raw.githubusercontent.com/.../main/...` до 5 минут, поэтому сразу после обновления
+ссылка на `main` может ещё отдавать прошлую версию. Ссылки на релиз и на конкретный коммит всегда актуальны.
+
+Пока идут проверки, скрипт узнаёт номер последнего релиза (читает первые 2 КБ его `ipregion.sh`).
+Если он новее, в конце вывода появится «A newer version is available» и команда для запуска, а в JSON — поле `latest_version`.
 Если GitHub недоступен, скрипт ничего не пишет. Отключить: `--no-update-check`.
 
 ## Лицензия
